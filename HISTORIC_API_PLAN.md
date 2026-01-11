@@ -222,29 +222,48 @@ pub struct Changeset {
 </osm>
 ```
 
-### JSON Output Format
+### JSON Output Format (Single Changeset)
 
 ```json
 {
   "version": "0.6",
   "generator": "changeset-historic-api/0.1.0",
+  "copyright": "OpenStreetMap and contributors",
+  "attribution": "http://www.openstreetmap.org/copyright",
+  "license": "http://opendatacommons.org/licenses/odbl/1-0/",
+  "changeset": {
+    "id": 168575829,
+    "created_at": "2024-10-15T10:30:00Z",
+    "closed_at": "2024-10-15T10:45:00Z",
+    "open": false,
+    "user": "mvexel",
+    "uid": 12345,
+    "min_lat": 40.7128,
+    "min_lon": -74.0060,
+    "max_lat": 40.7200,
+    "max_lon": -73.9900,
+    "changes_count": 42,
+    "comments_count": 2,
+    "tags": {
+      "comment": "Fixed street names in Manhattan"
+    }
+  }
+}
+```
+
+### JSON Output Format (List)
+
+```json
+{
+  "version": "0.6",
+  "generator": "changeset-historic-api/0.1.0",
+  "copyright": "OpenStreetMap and contributors",
+  "attribution": "http://www.openstreetmap.org/copyright",
+  "license": "http://opendatacommons.org/licenses/odbl/1-0/",
   "changesets": [
     {
       "id": 168575829,
-      "created_at": "2024-10-15T10:30:00Z",
-      "closed_at": "2024-10-15T10:45:00Z",
-      "open": false,
-      "user": "mvexel",
-      "uid": 12345,
-      "min_lat": 40.7128,
-      "min_lon": -74.0060,
-      "max_lat": 40.7200,
-      "max_lon": -73.9900,
-      "num_changes": 42,
-      "comments_count": 2,
-      "tags": {
-        "comment": "Fixed street names in Manhattan"
-      }
+      ...
     }
   ]
 }
@@ -331,7 +350,7 @@ reqwest = { version = "0.12", features = ["json"] }
 - [x] Single changeset endpoint (/changeset/:id)
 - [x] Date-based endpoint (/changesets/day/:date)
 - [x] XML formatter (OSM replication compatible)
-- [x] JSON formatter
+- [x] JSON formatter (aligned with official OSM API)
 - [x] Metadata endpoints (/meta/tip, /meta/coverage)
 - [x] Health check endpoint
 - [x] Basic error handling
@@ -339,11 +358,11 @@ reqwest = { version = "0.12", features = ["json"] }
 ### Phase 2: Query Features (Week 2-3)
 - [x] ID range queries (/changesets/from/:id/to/:id)
 - [x] Date range queries
-- [ ] Hour/minute precision endpoints
+- [x] Hour/minute precision endpoints
 - [x] Query parameter filtering (user, uid, open)
 - [x] Pagination (limit, offset)
 - [ ] ID range index generation
-- [ ] Partition resolution logic
+- [x] Partition resolution logic
 
 ### Phase 3: Performance & Deployment (Week 3-4)
 - [ ] LRU caching for hot queries
