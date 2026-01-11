@@ -17,7 +17,20 @@ pub struct JsonFormatter {
 struct JsonResponse {
     version: String,
     generator: String,
+    copyright: String,
+    attribution: String,
+    license: String,
     changesets: Vec<JsonChangeset>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SingleJsonResponse {
+    version: String,
+    generator: String,
+    copyright: String,
+    attribution: String,
+    license: String,
+    changeset: JsonChangeset,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,6 +53,7 @@ struct JsonChangeset {
     max_lat: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_lon: Option<f64>,
+    #[serde(rename = "changes_count")]
     num_changes: u32,
     comments_count: u32,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
@@ -83,10 +97,13 @@ impl JsonFormatter {
 
 impl Formatter for JsonFormatter {
     fn format_changeset(&self, changeset: &Changeset) -> Result<String, Box<dyn std::error::Error>> {
-        let response = JsonResponse {
+        let response = SingleJsonResponse {
             version: "0.6".to_string(),
             generator: "changeset-historic-api/0.1.0".to_string(),
-            changesets: vec![self.to_json_changeset(changeset)],
+            copyright: "OpenStreetMap and contributors".to_string(),
+            attribution: "http://www.openstreetmap.org/copyright".to_string(),
+            license: "http://opendatacommons.org/licenses/odbl/1-0/".to_string(),
+            changeset: self.to_json_changeset(changeset),
         };
 
         if self.pretty {
@@ -100,6 +117,9 @@ impl Formatter for JsonFormatter {
         let response = JsonResponse {
             version: "0.6".to_string(),
             generator: "changeset-historic-api/0.1.0".to_string(),
+            copyright: "OpenStreetMap and contributors".to_string(),
+            attribution: "http://www.openstreetmap.org/copyright".to_string(),
+            license: "http://opendatacommons.org/licenses/odbl/1-0/".to_string(),
             changesets: changesets.iter().map(|c| self.to_json_changeset(c)).collect(),
         };
 
@@ -144,8 +164,8 @@ mod tests {
         let json = formatter.format_changeset(&changeset).expect("json");
         let value: Value = serde_json::from_str(&json).expect("parse json");
 
-        assert_eq!(value["changesets"][0]["id"], 1);
-        assert_eq!(value["changesets"][0]["tags"]["comment"], "hello");
+        assert_eq!(value["changeset"]["id"], 1);
+        assert_eq!(value["changeset"]["tags"]["comment"], "hello");
     }
 
     #[test]
@@ -158,7 +178,7 @@ mod tests {
         let json = formatter.format_changeset(&changeset).expect("json");
         let value: Value = serde_json::from_str(&json).expect("parse json");
 
-        assert_eq!(value["changesets"][0]["tags"]["comment"], "custom");
+        assert_eq!(value["changeset"]["tags"]["comment"], "custom");
     }
 
     #[test]
@@ -168,6 +188,6 @@ mod tests {
         let json = formatter.format_changeset(&changeset).expect("json");
         let value: Value = serde_json::from_str(&json).expect("parse json");
 
-        assert!(value["changesets"][0].get("tags").is_none());
+        assert!(value["changeset"].get("tags").is_none());
     }
 }

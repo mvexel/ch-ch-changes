@@ -165,19 +165,88 @@ pub async fn get_changesets_range(
 }
 
 pub async fn get_changesets_by_hour(
-    State(_state): State<AppState>,
-    Path((_date, _hour)): Path<(String, String)>,
+    State(state): State<AppState>,
+    Path((date_str, hour_str)): Path<(String, String)>,
+    Query(params): Query<QueryParams>,
 ) -> Response {
-    // TODO: Implement
-    StatusCode::NOT_IMPLEMENTED.into_response()
+    let date = match NaiveDate::parse_from_str(&date_str, "%Y%m%d") {
+        Ok(d) => d,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let hour = match hour_str.parse::<u32>() {
+        Ok(h) if h < 24 => h,
+        _ => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let start_naive = match date.and_hms_opt(hour, 0, 0) {
+        Some(dt) => dt,
+        None => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let end_naive = match date.and_hms_opt(hour, 59, 59) {
+        Some(dt) => dt,
+        None => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let start = Utc.from_utc_datetime(&start_naive);
+    let end = Utc.from_utc_datetime(&end_naive);
+
+    match state.engine.get_changesets_by_date_range(
+        &start.to_rfc3339(),
+        &end.to_rfc3339(),
+        &params.to_filters(),
+    ) {
+        Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
+        Err(e) => {
+            tracing::error!("Query error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 pub async fn get_changesets_by_minute(
-    State(_state): State<AppState>,
-    Path((_date, _hour, _minute)): Path<(String, String, String)>,
+    State(state): State<AppState>,
+    Path((date_str, hour_str, minute_str)): Path<(String, String, String)>,
+    Query(params): Query<QueryParams>,
 ) -> Response {
-    // TODO: Implement
-    StatusCode::NOT_IMPLEMENTED.into_response()
+    let date = match NaiveDate::parse_from_str(&date_str, "%Y%m%d") {
+        Ok(d) => d,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let hour = match hour_str.parse::<u32>() {
+        Ok(h) if h < 24 => h,
+        _ => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let minute = match minute_str.parse::<u32>() {
+        Ok(m) if m < 60 => m,
+        _ => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let start_naive = match date.and_hms_opt(hour, minute, 0) {
+        Some(dt) => dt,
+        None => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let end_naive = match date.and_hms_opt(hour, minute, 59) {
+        Some(dt) => dt,
+        None => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let start = Utc.from_utc_datetime(&start_naive);
+    let end = Utc.from_utc_datetime(&end_naive);
+
+    match state.engine.get_changesets_by_date_range(
+        &start.to_rfc3339(),
+        &end.to_rfc3339(),
+        &params.to_filters(),
+    ) {
+        Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
+        Err(e) => {
+            tracing::error!("Query error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -279,6 +348,96 @@ mod tests {
         let response = get_changesets_by_day(
             State(state),
             Path("bad-date".to_string()),
+            Query(QueryParams {
+                format: None,
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_hour_json() {
+        let (_dir, state) = setup_state();
+        let response = get_changesets_by_hour(
+            State(state),
+            Path(("20240502".to_string(), "12".to_string())),
+            Query(QueryParams {
+                format: Some("json".to_string()),
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let value: Value = serde_json::from_slice(&body).expect("json");
+        let changesets = value["changesets"].as_array().expect("changesets");
+        assert_eq!(changesets.len(), 1);
+        assert_eq!(changesets[0]["id"], 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_hour_invalid_hour() {
+        let (_dir, state) = setup_state();
+        let response = get_changesets_by_hour(
+            State(state),
+            Path(("20240502".to_string(), "24".to_string())),
+            Query(QueryParams {
+                format: None,
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_minute_json() {
+        let (_dir, state) = setup_state();
+        let response = get_changesets_by_minute(
+            State(state),
+            Path(("20240501".to_string(), "00".to_string(), "00".to_string())),
+            Query(QueryParams {
+                format: Some("json".to_string()),
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let value: Value = serde_json::from_slice(&body).expect("json");
+        let changesets = value["changesets"].as_array().expect("changesets");
+        assert_eq!(changesets.len(), 1);
+        assert_eq!(changesets[0]["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_minute_invalid_minute() {
+        let (_dir, state) = setup_state();
+        let response = get_changesets_by_minute(
+            State(state),
+            Path(("20240501".to_string(), "00".to_string(), "60".to_string())),
             Query(QueryParams {
                 format: None,
                 user: None,

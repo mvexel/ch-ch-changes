@@ -15,6 +15,14 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/changeset/:id", get(changeset::get_changeset))
         .route("/changesets/day/:date", get(changesets::get_changesets_by_day))
+        .route(
+            "/changesets/day/:date/hour/:hour",
+            get(changesets::get_changesets_by_hour),
+        )
+        .route(
+            "/changesets/day/:date/hour/:hour/minute/:minute",
+            get(changesets::get_changesets_by_minute),
+        )
         .route("/changesets/from/:start/to/:end", get(changesets::get_changesets_range))
         .route("/health", get(meta::health))
         .route("/meta/tip", get(meta::get_tip))

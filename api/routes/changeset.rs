@@ -185,8 +185,8 @@ mod tests {
 
         let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
         let value: Value = serde_json::from_slice(&body).expect("json");
-        assert_eq!(value["changesets"][0]["id"], 1);
-        assert_eq!(value["changesets"][0]["tags"]["comment"], "first");
+        assert_eq!(value["changeset"]["id"], 1);
+        assert_eq!(value["changeset"]["tags"]["comment"], "first");
     }
 
     #[tokio::test]
