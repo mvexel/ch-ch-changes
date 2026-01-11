@@ -8,6 +8,7 @@ RUN rustup update stable && \
     apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy manifests
