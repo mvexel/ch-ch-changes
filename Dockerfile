@@ -1,5 +1,5 @@
 # Multi-stage build for Changeset Historic API
-FROM rust:slim as builder
+FROM rust:slim-bookworm as builder
 
 WORKDIR /app
 
@@ -30,6 +30,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from builder
