@@ -1,5 +1,3 @@
-pub mod api;
-
 /// Represents a changeset in the OSM data
 #[derive(Debug, Default, Clone)]
 pub struct Changeset {

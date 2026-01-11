@@ -14,9 +14,10 @@ use crate::AppState;
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/changeset/:id", get(changeset::get_changeset))
-        .route("/changeset/:id.xml", get(changeset::get_changeset_xml))
-        .route("/changeset/:id.json", get(changeset::get_changeset_json))
         .route("/changesets/day/:date", get(changesets::get_changesets_by_day))
         .route("/changesets/from/:start/to/:end", get(changesets::get_changesets_range))
+        .route("/health", get(meta::health))
+        .route("/meta/tip", get(meta::get_tip))
+        .route("/meta/coverage", get(meta::get_coverage))
         .with_state(state)
 }

@@ -23,10 +23,18 @@ pub struct FormatQuery {
 /// Get a single changeset by ID
 pub async fn get_changeset(
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(raw_id): Path<String>,
     Query(params): Query<FormatQuery>,
 ) -> Response {
-    let format = params.format.as_deref().unwrap_or("xml");
+    let (id, path_format) = match parse_id_and_format(&raw_id) {
+        Ok(parsed) => parsed,
+        Err(status) => return status.into_response(),
+    };
+
+    let format = path_format
+        .as_deref()
+        .or(params.format.as_deref())
+        .unwrap_or("xml");
     match format {
         "json" => get_changeset_json(State(state), Path(id)).await.into_response(),
         _ => get_changeset_xml(State(state), Path(id)).await.into_response(),
@@ -78,5 +86,128 @@ pub async fn get_changeset_json(
             tracing::error!("Query error: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
+    }
+}
+
+fn parse_id_and_format(raw: &str) -> Result<(i64, Option<String>), StatusCode> {
+    let (id_part, format) = match raw.rsplit_once('.') {
+        Some((id_part, ext)) if ext.eq_ignore_ascii_case("json") => {
+            (id_part, Some("json".to_string()))
+        }
+        Some((id_part, ext)) if ext.eq_ignore_ascii_case("xml") => {
+            (id_part, Some("xml".to_string()))
+        }
+        _ => (raw, None),
+    };
+
+    let id = id_part.parse::<i64>().map_err(|_| StatusCode::BAD_REQUEST)?;
+    Ok((id, format))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+    use duckdb::Connection;
+    use serde_json::Value;
+    use std::fs;
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tempfile::TempDir;
+
+    fn setup_state() -> (TempDir, AppState) {
+        let dir = TempDir::new().expect("tempdir");
+        let year_dir = dir.path().join("year=2024");
+        fs::create_dir_all(&year_dir).expect("year dir");
+
+        let parquet_path = year_dir.join("month=05.parquet");
+        let conn = Connection::open_in_memory().expect("duckdb");
+
+        conn.execute_batch(
+            "CREATE TABLE changesets (
+                id BIGINT,
+                created_at TIMESTAMP,
+                closed_at TIMESTAMP,
+                open BOOLEAN,
+                user VARCHAR,
+                uid BIGINT,
+                min_lat DOUBLE,
+                min_lon DOUBLE,
+                max_lat DOUBLE,
+                max_lon DOUBLE,
+                num_changes INTEGER,
+                comments_count INTEGER,
+                description VARCHAR
+            );",
+        )
+        .expect("create table");
+
+        conn.execute_batch(
+            "INSERT INTO changesets VALUES
+                (1, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first'),
+                (2, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second');",
+        )
+        .expect("insert rows");
+
+        let parquet_path_sql = parquet_path.to_string_lossy().replace('\'', "''");
+        let copy_sql = format!(
+            "COPY changesets TO '{}' (FORMAT PARQUET);",
+            parquet_path_sql
+        );
+        conn.execute_batch(&copy_sql).expect("copy parquet");
+
+        let engine = crate::query::QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
+        let state = AppState {
+            engine: Arc::new(engine),
+            started_at: Instant::now(),
+        };
+
+        (dir, state)
+    }
+
+    #[tokio::test]
+    async fn test_get_changeset_json_suffix() {
+        let (_dir, state) = setup_state();
+        let response = get_changeset(
+            State(state),
+            Path("1.json".to_string()),
+            Query(FormatQuery { format: None }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok());
+        assert_eq!(content_type, Some("application/json"));
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let value: Value = serde_json::from_slice(&body).expect("json");
+        assert_eq!(value["changesets"][0]["id"], 1);
+        assert_eq!(value["changesets"][0]["tags"]["comment"], "first");
+    }
+
+    #[tokio::test]
+    async fn test_get_changeset_xml_default() {
+        let (_dir, state) = setup_state();
+        let response = get_changeset(
+            State(state),
+            Path("1".to_string()),
+            Query(FormatQuery { format: None }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok());
+        assert_eq!(content_type, Some("application/xml"));
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let body_str = String::from_utf8(body.to_vec()).expect("utf8");
+        assert!(body_str.contains("<changeset id=\"1\""));
     }
 }

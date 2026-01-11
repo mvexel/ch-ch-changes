@@ -190,6 +190,9 @@ duckdb -c "SELECT user, COUNT(*) as changeset_count
            LIMIT 20"
 ```
 
+## huh?
+The `duckdb` crate version 1.1 with `bundled` feature has an opaque `OrderedMap` for `Value::Map` which does not expose public iteration methods, making it difficult to extract map values like tags without using SQL casting or waiting for upstream fixes.
+
 ## Optimizing Remote Queries
 
 - Enable DuckDB’s HTTP/S3 support and local object cache so repeated scans reuse downloaded row groups:

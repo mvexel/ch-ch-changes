@@ -24,6 +24,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 moka = { version = "0.12", features = ["future"] }
 
+[dev-dependencies]
+tempfile = "3.10"
+
 [[bin]]
 name = "changeset-server"
 path = "api/main.rs"

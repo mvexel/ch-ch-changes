@@ -7,5 +7,6 @@ pub mod builder;
 pub mod partition;
 
 pub use engine::QueryEngine;
+pub use engine::QueryFilters;
 pub use builder::QueryBuilder;
 pub use partition::PartitionResolver;

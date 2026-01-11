@@ -151,13 +151,17 @@ pub async fn get_changesets_range(
     Path((start, end)): Path<(String, String)>,
     Query(params): Query<QueryParams>,
 ) -> Response {
-    // Try to parse as IDs first
+    if NaiveDate::parse_from_str(&start, "%Y%m%d").is_ok()
+        && NaiveDate::parse_from_str(&end, "%Y%m%d").is_ok()
+    {
+        return handle_date_range(state, start, end, params).await;
+    }
+
     if let (Ok(start_id), Ok(end_id)) = (start.parse::<i64>(), end.parse::<i64>()) {
         return handle_id_range(state, start_id, end_id, params).await;
     }
-    
-    // Fallback to date range
-    handle_date_range(state, start, end, params).await
+
+    StatusCode::BAD_REQUEST.into_response()
 }
 
 pub async fn get_changesets_by_hour(
@@ -174,4 +178,166 @@ pub async fn get_changesets_by_minute(
 ) -> Response {
     // TODO: Implement
     StatusCode::NOT_IMPLEMENTED.into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+    use duckdb::Connection;
+    use serde_json::Value;
+    use std::fs;
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tempfile::TempDir;
+
+    fn setup_state() -> (TempDir, AppState) {
+        let dir = TempDir::new().expect("tempdir");
+        let year_dir = dir.path().join("year=2024");
+        fs::create_dir_all(&year_dir).expect("year dir");
+
+        let parquet_path = year_dir.join("month=05.parquet");
+        let conn = Connection::open_in_memory().expect("duckdb");
+
+        conn.execute_batch(
+            "CREATE TABLE changesets (
+                id BIGINT,
+                created_at TIMESTAMP,
+                closed_at TIMESTAMP,
+                open BOOLEAN,
+                user VARCHAR,
+                uid BIGINT,
+                min_lat DOUBLE,
+                min_lon DOUBLE,
+                max_lat DOUBLE,
+                max_lon DOUBLE,
+                num_changes INTEGER,
+                comments_count INTEGER,
+                description VARCHAR
+            );",
+        )
+        .expect("create table");
+
+        conn.execute_batch(
+            "INSERT INTO changesets VALUES
+                (1, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first'),
+                (2, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second');",
+        )
+        .expect("insert rows");
+
+        let parquet_path_sql = parquet_path.to_string_lossy().replace('\'', "''");
+        let copy_sql = format!(
+            "COPY changesets TO '{}' (FORMAT PARQUET);",
+            parquet_path_sql
+        );
+        conn.execute_batch(&copy_sql).expect("copy parquet");
+
+        let engine = crate::query::QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
+        let state = AppState {
+            engine: Arc::new(engine),
+            started_at: Instant::now(),
+        };
+
+        (dir, state)
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_day_json() {
+        let (_dir, state) = setup_state();
+        let response = get_changesets_by_day(
+            State(state),
+            Path("20240501".to_string()),
+            Query(QueryParams {
+                format: Some("json".to_string()),
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok());
+        assert_eq!(content_type, Some("application/json"));
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let value: Value = serde_json::from_slice(&body).expect("json");
+        let changesets = value["changesets"].as_array().expect("changesets");
+        assert_eq!(changesets.len(), 1);
+        assert_eq!(changesets[0]["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_day_invalid_date() {
+        let (_dir, state) = setup_state();
+        let response = get_changesets_by_day(
+            State(state),
+            Path("bad-date".to_string()),
+            Query(QueryParams {
+                format: None,
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_range_id() {
+        let (_dir, state) = setup_state();
+        let response = get_changesets_range(
+            State(state),
+            Path(("1".to_string(), "2".to_string())),
+            Query(QueryParams {
+                format: Some("json".to_string()),
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let value: Value = serde_json::from_slice(&body).expect("json");
+        let changesets = value["changesets"].as_array().expect("changesets");
+        assert_eq!(changesets.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_range_date() {
+        let (_dir, state) = setup_state();
+        let response = get_changesets_range(
+            State(state),
+            Path(("20240501".to_string(), "20240502".to_string())),
+            Query(QueryParams {
+                format: Some("json".to_string()),
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let value: Value = serde_json::from_slice(&body).expect("json");
+        let changesets = value["changesets"].as_array().expect("changesets");
+        assert_eq!(changesets.len(), 2);
+    }
 }

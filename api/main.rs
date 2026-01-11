@@ -5,6 +5,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::env;
+use std::time::Instant;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber;
 
@@ -37,6 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState {
         engine: Arc::new(engine),
+        started_at: Instant::now(),
     };
 
     // Create router

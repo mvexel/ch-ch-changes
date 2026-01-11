@@ -84,11 +84,12 @@ impl XmlFormatter {
         xml.push_str(&format!(" num_changes=\"{}\"", changeset.num_changes));
         xml.push_str(&format!(" comments_count=\"{}\"", changeset.comments_count));
 
-        if changeset.tags.is_empty() {
+        let tags = self.collect_tags(changeset);
+        if tags.is_empty() {
             xml.push_str("/>\n");
         } else {
             xml.push_str(">\n");
-            xml.push_str(&self.format_tags(changeset));
+            xml.push_str(&self.format_tags(&tags));
             xml.push_str("\t</changeset>\n");
         }
 
@@ -96,18 +97,31 @@ impl XmlFormatter {
     }
 
     /// Format tags as XML elements
-    fn format_tags(&self, changeset: &Changeset) -> String {
+    fn format_tags(&self, tags: &[(String, String)]) -> String {
         let mut tags_xml = String::new();
-        // Sort tags by key for consistent output (optional but good for testing)
-        let mut sorted_tags: Vec<_> = changeset.tags.iter().collect();
-        sorted_tags.sort_by_key(|(k, _)| *k);
-
-        for (k, v) in sorted_tags {
+        for (k, v) in tags {
             tags_xml.push_str(&format!("\t\t<tag k=\"{}\" v=\"{}\"/>\n", 
                 Self::escape_xml(k), 
                 Self::escape_xml(v)));
         }
         tags_xml
+    }
+
+    fn collect_tags(&self, changeset: &Changeset) -> Vec<(String, String)> {
+        let mut tags: Vec<(String, String)> = changeset
+            .tags
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        if let Some(description) = &changeset.description {
+            if !tags.iter().any(|(k, _)| k == "comment") {
+                tags.push(("comment".to_string(), description.clone()));
+            }
+        }
+
+        tags.sort_by(|(a, _), (b, _)| a.cmp(b));
+        tags
     }
 }
 
@@ -128,5 +142,62 @@ impl Formatter for XmlFormatter {
         }
         xml.push_str("</osm>");
         Ok(xml)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Changeset;
+    use std::collections::HashMap;
+
+    fn build_changeset(id: i64, description: Option<&str>, tags: HashMap<String, String>) -> Changeset {
+        Changeset {
+            id,
+            created_at: None,
+            closed_at: None,
+            open: false,
+            user: None,
+            uid: None,
+            min_lat: None,
+            min_lon: None,
+            max_lat: None,
+            max_lon: None,
+            num_changes: 0,
+            comments_count: 0,
+            description: description.map(|value| value.to_string()),
+            tags,
+        }
+    }
+
+    #[test]
+    fn test_comment_tag_from_description() {
+        let changeset = build_changeset(1, Some("hello"), HashMap::new());
+        let formatter = XmlFormatter::new();
+        let xml = formatter.format_changeset(&changeset).expect("xml");
+
+        assert!(xml.contains("k=\"comment\" v=\"hello\""));
+    }
+
+    #[test]
+    fn test_existing_comment_not_duplicated() {
+        let mut tags = HashMap::new();
+        tags.insert("comment".to_string(), "custom".to_string());
+
+        let changeset = build_changeset(2, Some("ignored"), tags);
+        let formatter = XmlFormatter::new();
+        let xml = formatter.format_changeset(&changeset).expect("xml");
+
+        assert!(xml.contains("k=\"comment\" v=\"custom\""));
+        assert_eq!(xml.matches("k=\"comment\"").count(), 1);
+    }
+
+    #[test]
+    fn test_xml_escapes_special_chars() {
+        let changeset = build_changeset(3, Some("A & B < C"), HashMap::new());
+        let formatter = XmlFormatter::new();
+        let xml = formatter.format_changeset(&changeset).expect("xml");
+
+        assert!(xml.contains("v=\"A &amp; B &lt; C\""));
     }
 }

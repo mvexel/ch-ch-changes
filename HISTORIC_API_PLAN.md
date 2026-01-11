@@ -327,21 +327,21 @@ reqwest = { version = "0.12", features = ["json"] }
 
 ### Phase 1: Core API (Week 1-2)
 - [x] Project structure setup
-- [ ] DuckDB query engine wrapper
-- [ ] Single changeset endpoint (/changeset/:id)
-- [ ] Date-based endpoint (/changesets/day/:date)
-- [ ] XML formatter (OSM replication compatible)
-- [ ] JSON formatter
-- [ ] Metadata endpoints (/meta/tip, /meta/coverage)
-- [ ] Health check endpoint
-- [ ] Basic error handling
+- [x] DuckDB query engine wrapper
+- [x] Single changeset endpoint (/changeset/:id)
+- [x] Date-based endpoint (/changesets/day/:date)
+- [x] XML formatter (OSM replication compatible)
+- [x] JSON formatter
+- [x] Metadata endpoints (/meta/tip, /meta/coverage)
+- [x] Health check endpoint
+- [x] Basic error handling
 
 ### Phase 2: Query Features (Week 2-3)
-- [ ] ID range queries (/changesets/from/:id/to/:id)
-- [ ] Date range queries
+- [x] ID range queries (/changesets/from/:id/to/:id)
+- [x] Date range queries
 - [ ] Hour/minute precision endpoints
-- [ ] Query parameter filtering (user, uid, open)
-- [ ] Pagination (limit, offset)
+- [x] Query parameter filtering (user, uid, open)
+- [x] Pagination (limit, offset)
 - [ ] ID range index generation
 - [ ] Partition resolution logic
 

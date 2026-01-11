@@ -1,6 +1,6 @@
 # DuckDB Query Examples
 
-This document contains example SQL queries that can be run directly against the Parquet files using DuckDB, either through the `QueryEngine` or directly from the DuckDB CLI.
+This document contains example SQL queries that can be run directly against the Parquet files using DuckDB. The API server uses the same storage layout, but it does not expose a generic SQL endpoint.
 
 ## Setup
 
@@ -17,36 +17,34 @@ duckdb
 
 ```sql
 -- Point to your parquet files
-SELECT * FROM read_parquet('path/to/data/year=*/month=*.parquet') LIMIT 10;
+SELECT * FROM read_parquet('path/to/data/year=*/month=*.parquet', hive_partitioning=true) LIMIT 10;
 ```
 
-### Using the QueryEngine
+If you do not need the `year`/`month` partition columns, you can omit `hive_partitioning=true` and DuckDB will still read the data.
 
-```rust
-let changesets = engine.query(
-    "SELECT ... FROM read_parquet('...')"
-)?;
-```
+### API vs SQL
+
+The API server exposes specific endpoints described in `HISTORIC_API_PLAN.md` and does not accept raw SQL. Use the queries in this document for DuckDB CLI exploration or offline analysis of the Parquet files.
 
 ## Basic Queries
 
 ### Count all changesets
 ```sql
 SELECT COUNT(*) as total_changesets
-FROM read_parquet('data/year=*/month=*.parquet');
+FROM read_parquet('data/year=*/month=*.parquet', hive_partitioning=true);
 ```
 
 ### Get a specific changeset by ID
 ```sql
 SELECT *
-FROM read_parquet('data/year=*/month=*.parquet')
+FROM read_parquet('data/year=*/month=*.parquet', hive_partitioning=true)
 WHERE id = 168575829;
 ```
 
 ### List all changesets from a specific user
 ```sql
 SELECT id, created_at, closed_at, num_changes, description
-FROM read_parquet('data/year=*/month=*.parquet')
+FROM read_parquet('data/year=*/month=*.parquet', hive_partitioning=true)
 WHERE user = 'mvexel'
 ORDER BY created_at DESC
 LIMIT 100;
@@ -55,7 +53,7 @@ LIMIT 100;
 ### Get all changesets by user ID
 ```sql
 SELECT id, created_at, user, num_changes
-FROM read_parquet('data/year=*/month=*.parquet')
+FROM read_parquet('data/year=*/month=*.parquet', hive_partitioning=true)
 WHERE uid = 12345
 ORDER BY created_at DESC;
 ```
@@ -434,7 +432,7 @@ Apply WHERE clauses to reduce data:
 -- Good: filtered before aggregation
 SELECT user, COUNT(*)
 FROM read_parquet('data/year=*/month=*.parquet')
-WHERE created_at >= '2024-01-01'
+WHERE created_at >= '2024-01-01'::TIMESTAMP
 GROUP BY user;
 ```
 
@@ -454,18 +452,6 @@ SELECT * FROM ... (no limit)
 ```bash
 duckdb
 D SELECT * FROM read_parquet('data/year=*/month=*.parquet') LIMIT 5;
-```
-
-### Via QueryEngine
-```rust
-let results = engine.query(
-    "SELECT user, COUNT(*) as count \
-     FROM read_parquet('data/year=*/month=*.parquet') \
-     WHERE created_at >= '2024-01-01' \
-     GROUP BY user \
-     ORDER BY count DESC \
-     LIMIT 10"
-)?;
 ```
 
 ### Via SQL file
