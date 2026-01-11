@@ -7,14 +7,17 @@ use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use bzip2::read::MultiBzDecoder;
 use clap::Parser;
+use changesets_to_parquet::Changeset;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 use quick_xml::Reader;
-use std::fs::File;
+use std::collections::HashMap;
+use std::fs::{self, File};
 use std::io::BufReader;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Parser, Debug)]
@@ -24,9 +27,21 @@ struct Args {
     #[arg(short, long)]
     input: String,
 
-    /// Output Parquet file
+    /// Output Parquet file (used when --partition is not set)
     #[arg(short, long)]
-    output: String,
+    output: Option<String>,
+
+    /// Output directory for partitioned files (used with --partition)
+    #[arg(long)]
+    output_dir: Option<String>,
+
+    /// Enable partitioned output by year/month
+    #[arg(long, default_value_t = false)]
+    partition: bool,
+
+    /// Generate index files (user_stats.parquet, open_changesets.parquet)
+    #[arg(long, default_value_t = false)]
+    generate_indexes: bool,
 
     /// Batch size for writing records
     #[arg(short, long, default_value_t = 100000)]
@@ -37,22 +52,6 @@ struct Args {
     continue_on_error: bool,
 }
 
-#[derive(Debug, Default)]
-struct Changeset {
-    id: i64,
-    created_at: Option<i64>,
-    closed_at: Option<i64>,
-    open: bool,
-    user: Option<String>,
-    uid: Option<i64>,
-    min_lat: Option<f64>,
-    min_lon: Option<f64>,
-    max_lat: Option<f64>,
-    max_lon: Option<f64>,
-    num_changes: u32,
-    comments_count: u32,
-    description: Option<String>,
-}
 
 struct BatchBuilders {
     id: Int64Builder,
@@ -187,6 +186,326 @@ impl BatchBuilders {
         let batch = RecordBatch::try_new(schema.clone(), columns)?;
         self.len = 0;
         Ok(batch)
+    }
+}
+
+/// Partition key for year/month partitioning
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+struct PartitionKey {
+    year: i32,
+    month: u32,
+}
+
+impl PartitionKey {
+    fn from_timestamp_millis(ts: i64) -> Self {
+        use chrono::{TimeZone, Utc};
+        let dt = Utc.timestamp_millis_opt(ts).unwrap();
+        Self {
+            year: dt.year(),
+            month: dt.month(),
+        }
+    }
+
+    fn path(&self) -> String {
+        format!("year={}/month={:02}.parquet", self.year, self.month)
+    }
+}
+
+use chrono::Datelike;
+
+/// Manages multiple Parquet writers, one per partition
+struct PartitionedWriter {
+    output_dir: PathBuf,
+    schema: Arc<Schema>,
+    props: WriterProperties,
+    batch_size: usize,
+    writers: HashMap<PartitionKey, ArrowWriter<File>>,
+    builders: HashMap<PartitionKey, BatchBuilders>,
+    partition_counts: HashMap<PartitionKey, usize>,
+}
+
+impl PartitionedWriter {
+    fn new(output_dir: PathBuf, schema: Arc<Schema>, batch_size: usize) -> Result<Self> {
+        // Create output directory structure
+        fs::create_dir_all(&output_dir)
+            .with_context(|| format!("Failed to create output directory: {:?}", output_dir))?;
+
+        let props = WriterProperties::builder()
+            .set_compression(Compression::SNAPPY)
+            .build();
+
+        Ok(Self {
+            output_dir,
+            schema,
+            props,
+            batch_size,
+            writers: HashMap::new(),
+            builders: HashMap::new(),
+            partition_counts: HashMap::new(),
+        })
+    }
+
+    fn get_or_create_writer(&mut self, key: &PartitionKey) -> Result<()> {
+        if !self.writers.contains_key(key) {
+            // Create directory for this partition
+            let partition_dir = self.output_dir.join(format!("year={}", key.year));
+            fs::create_dir_all(&partition_dir)?;
+
+            let file_path = self.output_dir.join(key.path());
+            let file = File::create(&file_path)
+                .with_context(|| format!("Failed to create partition file: {:?}", file_path))?;
+
+            let writer =
+                ArrowWriter::try_new(file, self.schema.clone(), Some(self.props.clone()))?;
+            self.writers.insert(key.clone(), writer);
+            self.builders
+                .insert(key.clone(), BatchBuilders::with_capacity(self.batch_size));
+            self.partition_counts.insert(key.clone(), 0);
+        }
+        Ok(())
+    }
+
+    fn write_changeset(&mut self, cs: &Changeset) -> Result<()> {
+        // Determine partition key from created_at timestamp
+        let key = match cs.created_at {
+            Some(ts) => PartitionKey::from_timestamp_millis(ts),
+            None => {
+                // Changesets without created_at go to year=0/month=00
+                PartitionKey { year: 0, month: 0 }
+            }
+        };
+
+        self.get_or_create_writer(&key)?;
+
+        let builders = self.builders.get_mut(&key).unwrap();
+        builders.append(cs);
+        *self.partition_counts.get_mut(&key).unwrap() += 1;
+
+        // Flush if batch is full
+        if builders.len() >= self.batch_size {
+            let batch = builders.finish_batch(&self.schema)?;
+            let writer = self.writers.get_mut(&key).unwrap();
+            writer.write(&batch)?;
+        }
+
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<HashMap<PartitionKey, usize>> {
+        // Flush remaining data in all partitions
+        for (key, mut builders) in self.builders.drain() {
+            if !builders.is_empty() {
+                let batch = builders.finish_batch(&self.schema)?;
+                if let Some(writer) = self.writers.get_mut(&key) {
+                    writer.write(&batch)?;
+                }
+            }
+        }
+
+        // Close all writers
+        for (key, writer) in self.writers.drain() {
+            writer.close()?;
+            println!(
+                "  Partition {}: {} changesets",
+                key.path(),
+                self.partition_counts.get(&key).unwrap_or(&0)
+            );
+        }
+
+        Ok(self.partition_counts)
+    }
+}
+
+/// Tracks user statistics for index generation
+#[derive(Debug, Default)]
+struct UserStats {
+    uid: i64,
+    username: Option<String>,
+    changeset_count: u64,
+    first_changeset_at: Option<i64>,
+    last_changeset_at: Option<i64>,
+}
+
+/// Collects data for generating indexes
+struct IndexCollector {
+    user_stats: HashMap<i64, UserStats>,
+    open_changesets: Vec<Changeset>,
+}
+
+impl IndexCollector {
+    fn new() -> Self {
+        Self {
+            user_stats: HashMap::new(),
+            open_changesets: Vec::new(),
+        }
+    }
+
+    fn record(&mut self, cs: &Changeset) {
+        // Track open changesets
+        if cs.open {
+            self.open_changesets.push(Changeset {
+                id: cs.id,
+                created_at: cs.created_at,
+                closed_at: cs.closed_at,
+                open: cs.open,
+                user: cs.user.clone(),
+                uid: cs.uid,
+                min_lat: cs.min_lat,
+                min_lon: cs.min_lon,
+                max_lat: cs.max_lat,
+                max_lon: cs.max_lon,
+                num_changes: cs.num_changes,
+                comments_count: cs.comments_count,
+                description: cs.description.clone(),
+            });
+        }
+
+        // Track user stats
+        if let Some(uid) = cs.uid {
+            let stats = self.user_stats.entry(uid).or_insert_with(|| UserStats {
+                uid,
+                username: cs.user.clone(),
+                ..Default::default()
+            });
+            stats.changeset_count += 1;
+
+            // Update username if we have one (may change over time)
+            if cs.user.is_some() {
+                stats.username = cs.user.clone();
+            }
+
+            // Track first/last changeset times
+            if let Some(ts) = cs.created_at {
+                match stats.first_changeset_at {
+                    None => stats.first_changeset_at = Some(ts),
+                    Some(first) if ts < first => stats.first_changeset_at = Some(ts),
+                    _ => {}
+                }
+                match stats.last_changeset_at {
+                    None => stats.last_changeset_at = Some(ts),
+                    Some(last) if ts > last => stats.last_changeset_at = Some(ts),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn write_indexes(self, output_dir: &PathBuf, schema: &Arc<Schema>) -> Result<()> {
+        let indexes_dir = output_dir.join("indexes");
+        fs::create_dir_all(&indexes_dir)?;
+
+        // Write open changesets index
+        self.write_open_changesets_index(&indexes_dir, schema)?;
+
+        // Write user stats index
+        self.write_user_stats_index(&indexes_dir)?;
+
+        Ok(())
+    }
+
+    fn write_open_changesets_index(
+        &self,
+        indexes_dir: &PathBuf,
+        schema: &Arc<Schema>,
+    ) -> Result<()> {
+        let file_path = indexes_dir.join("open_changesets.parquet");
+        let file = File::create(&file_path)?;
+
+        let props = WriterProperties::builder()
+            .set_compression(Compression::SNAPPY)
+            .build();
+
+        let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(props))?;
+        let mut builders = BatchBuilders::with_capacity(self.open_changesets.len().max(1));
+
+        for cs in &self.open_changesets {
+            builders.append(cs);
+        }
+
+        if !builders.is_empty() {
+            let batch = builders.finish_batch(schema)?;
+            writer.write(&batch)?;
+        }
+
+        writer.close()?;
+        println!(
+            "  Index open_changesets.parquet: {} changesets",
+            self.open_changesets.len()
+        );
+
+        Ok(())
+    }
+
+    fn write_user_stats_index(&self, indexes_dir: &PathBuf) -> Result<()> {
+        let file_path = indexes_dir.join("user_stats.parquet");
+        let file = File::create(&file_path)?;
+
+        let user_schema = Arc::new(Schema::new(vec![
+            Field::new("uid", DataType::Int64, false),
+            Field::new("username", DataType::Utf8, true),
+            Field::new("changeset_count", DataType::UInt64, false),
+            Field::new(
+                "first_changeset_at",
+                DataType::Timestamp(TimeUnit::Millisecond, None),
+                true,
+            ),
+            Field::new(
+                "last_changeset_at",
+                DataType::Timestamp(TimeUnit::Millisecond, None),
+                true,
+            ),
+        ]));
+
+        let props = WriterProperties::builder()
+            .set_compression(Compression::SNAPPY)
+            .build();
+
+        let mut writer = ArrowWriter::try_new(file, user_schema.clone(), Some(props))?;
+
+        // Build arrays
+        let capacity = self.user_stats.len();
+        let mut uid_builder = Int64Builder::with_capacity(capacity);
+        let mut username_builder = StringBuilder::with_capacity(capacity, capacity * 16);
+        let mut count_builder =
+            arrow::array::UInt64Builder::with_capacity(capacity);
+        let mut first_builder = TimestampMillisecondBuilder::with_capacity(capacity);
+        let mut last_builder = TimestampMillisecondBuilder::with_capacity(capacity);
+
+        for stats in self.user_stats.values() {
+            uid_builder.append_value(stats.uid);
+            match &stats.username {
+                Some(name) => username_builder.append_value(name),
+                None => username_builder.append_null(),
+            }
+            count_builder.append_value(stats.changeset_count);
+            match stats.first_changeset_at {
+                Some(ts) => first_builder.append_value(ts),
+                None => first_builder.append_null(),
+            }
+            match stats.last_changeset_at {
+                Some(ts) => last_builder.append_value(ts),
+                None => last_builder.append_null(),
+            }
+        }
+
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(uid_builder.finish()),
+            Arc::new(username_builder.finish()),
+            Arc::new(count_builder.finish()),
+            Arc::new(first_builder.finish()),
+            Arc::new(last_builder.finish()),
+        ];
+
+        let batch = RecordBatch::try_new(user_schema, columns)?;
+        writer.write(&batch)?;
+        writer.close()?;
+
+        println!(
+            "  Index user_stats.parquet: {} users",
+            self.user_stats.len()
+        );
+
+        Ok(())
     }
 }
 
@@ -381,6 +700,89 @@ fn parse_and_write_changesets<R: std::io::Read>(
     Ok(count)
 }
 
+/// Parse and write changesets to partitioned output
+fn parse_and_write_partitioned<R: std::io::Read>(
+    reader: R,
+    partitioned_writer: &mut PartitionedWriter,
+    mut index_collector: Option<&mut IndexCollector>,
+    continue_on_error: bool,
+) -> Result<usize> {
+    let buffered_reader = BufReader::with_capacity(1024 * 1024, reader);
+    let mut xml_reader = Reader::from_reader(buffered_reader);
+    xml_reader.config_mut().trim_text_start = true;
+    xml_reader.config_mut().trim_text_end = true;
+    xml_reader.config_mut().check_end_names = false;
+    xml_reader.config_mut().check_comments = false;
+
+    let mut buf = Vec::new();
+    let mut temp_buf = Vec::new();
+    let mut count = 0;
+    let mut last_changeset_id = 0i64;
+
+    loop {
+        let position = xml_reader.buffer_position();
+        match xml_reader.read_event_into(&mut buf) {
+            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"changeset" => {
+                let changeset = parse_changeset_element(e)?;
+                last_changeset_id = changeset.id;
+
+                if let Some(ref mut collector) = index_collector.as_deref_mut() {
+                    collector.record(&changeset);
+                }
+
+                partitioned_writer.write_changeset(&changeset)?;
+                count += 1;
+
+                if count % 1_000_000 == 0 {
+                    println!("Processed {} changesets...", count);
+                }
+            }
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"changeset" => {
+                let mut changeset = parse_changeset_element(e)?;
+                temp_buf.clear();
+                parse_changeset_body(&mut xml_reader, &mut changeset, &mut temp_buf)?;
+                temp_buf.clear();
+
+                last_changeset_id = changeset.id;
+
+                if let Some(ref mut collector) = index_collector.as_deref_mut() {
+                    collector.record(&changeset);
+                }
+
+                partitioned_writer.write_changeset(&changeset)?;
+                count += 1;
+
+                if count % 1_000_000 == 0 {
+                    println!("Processed {} changesets...", count);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                eprintln!("\n=== XML PARSE ERROR ===");
+                eprintln!("Position: {}", position);
+                eprintln!("Changesets processed: {}", count);
+                eprintln!("Last changeset ID: {}", last_changeset_id);
+                eprintln!("Error: {}", e);
+                eprintln!("======================\n");
+
+                if continue_on_error {
+                    eprintln!("Continuing with {} successfully parsed changesets...", count);
+                    break;
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Error parsing XML: {}. Use --continue-on-error to save partial results.",
+                        e
+                    ));
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(count)
+}
+
 fn create_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
@@ -410,47 +812,164 @@ fn create_schema() -> Arc<Schema> {
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Validate arguments
+    if args.partition {
+        if args.output_dir.is_none() {
+            return Err(anyhow::anyhow!(
+                "--output-dir is required when using --partition"
+            ));
+        }
+    } else if args.output.is_none() {
+        return Err(anyhow::anyhow!(
+            "--output is required when not using --partition"
+        ));
+    }
+
     println!("Reading from: {}", args.input);
-    println!("Writing to: {}", args.output);
-
-    // Set up parquet writer first
-    let output_file = File::create(&args.output)
-        .with_context(|| format!("Failed to create output file: {}", args.output))?;
-
-    let props = WriterProperties::builder()
-        .set_compression(Compression::SNAPPY)
-        .build();
 
     let schema = create_schema();
-    let mut writer = ArrowWriter::try_new(output_file, schema.clone(), Some(props))?;
 
-    // Stream parse and write
+    // Open input file
     let file = File::open(&args.input)
         .with_context(|| format!("Failed to open input file: {}", args.input))?;
 
-    let total_count = if args.input.ends_with(".bz2") {
-        println!("Detected bzip2 multi-stream compressed file");
-        let decoder = MultiBzDecoder::new(file);
-        parse_and_write_changesets(
-            decoder,
-            &mut writer,
-            &schema,
-            args.batch_size,
-            args.continue_on_error,
-        )?
+    if args.partition {
+        // Partitioned output mode
+        let output_dir = PathBuf::from(args.output_dir.as_ref().unwrap());
+        println!("Writing partitioned output to: {:?}", output_dir);
+
+        let mut partitioned_writer =
+            PartitionedWriter::new(output_dir.clone(), schema.clone(), args.batch_size)?;
+
+        let mut index_collector = if args.generate_indexes {
+            println!("Index generation enabled");
+            Some(IndexCollector::new())
+        } else {
+            None
+        };
+
+        let total_count = if args.input.ends_with(".bz2") {
+            println!("Detected bzip2 multi-stream compressed file");
+            let decoder = MultiBzDecoder::new(file);
+            parse_and_write_partitioned(
+                decoder,
+                &mut partitioned_writer,
+                index_collector.as_mut(),
+                args.continue_on_error,
+            )?
+        } else {
+            parse_and_write_partitioned(
+                file,
+                &mut partitioned_writer,
+                index_collector.as_mut(),
+                args.continue_on_error,
+            )?
+        };
+
+        println!("\nFinalizing partitions...");
+        let partition_counts = partitioned_writer.finish()?;
+
+        if let Some(collector) = index_collector {
+            println!("\nWriting indexes...");
+            collector.write_indexes(&output_dir, &schema)?;
+        }
+
+        println!(
+            "\nSuccessfully wrote {} changesets to {} partitions",
+            total_count,
+            partition_counts.len()
+        );
+
+        // Write metadata file
+        write_metadata(&output_dir, total_count, &partition_counts)?;
     } else {
-        parse_and_write_changesets(
-            file,
-            &mut writer,
-            &schema,
-            args.batch_size,
-            args.continue_on_error,
-        )?
-    };
+        // Single file output mode (original behavior)
+        let output = args.output.as_ref().unwrap();
+        println!("Writing to: {}", output);
 
-    writer.close()?;
+        let output_file = File::create(output)
+            .with_context(|| format!("Failed to create output file: {}", output))?;
 
-    println!("Successfully wrote {} changesets to {}", total_count, args.output);
+        let props = WriterProperties::builder()
+            .set_compression(Compression::SNAPPY)
+            .build();
+
+        let mut writer = ArrowWriter::try_new(output_file, schema.clone(), Some(props))?;
+
+        let total_count = if args.input.ends_with(".bz2") {
+            println!("Detected bzip2 multi-stream compressed file");
+            let decoder = MultiBzDecoder::new(file);
+            parse_and_write_changesets(
+                decoder,
+                &mut writer,
+                &schema,
+                args.batch_size,
+                args.continue_on_error,
+            )?
+        } else {
+            parse_and_write_changesets(
+                file,
+                &mut writer,
+                &schema,
+                args.batch_size,
+                args.continue_on_error,
+            )?
+        };
+
+        writer.close()?;
+
+        println!(
+            "Successfully wrote {} changesets to {}",
+            total_count, output
+        );
+    }
+
+    Ok(())
+}
+
+/// Write metadata.json file with partition information
+fn write_metadata(
+    output_dir: &PathBuf,
+    total_count: usize,
+    partition_counts: &HashMap<PartitionKey, usize>,
+) -> Result<()> {
+    use std::io::Write;
+
+    let metadata_path = output_dir.join("metadata.json");
+    let mut file = File::create(&metadata_path)?;
+
+    // Build partition list sorted by year/month
+    let mut partitions: Vec<_> = partition_counts
+        .iter()
+        .map(|(k, v)| {
+            serde_json::json!({
+                "year": k.year,
+                "month": k.month,
+                "path": k.path(),
+                "count": v
+            })
+        })
+        .collect();
+
+    partitions.sort_by(|a, b| {
+        let ya = a["year"].as_i64().unwrap();
+        let yb = b["year"].as_i64().unwrap();
+        let ma = a["month"].as_u64().unwrap();
+        let mb = b["month"].as_u64().unwrap();
+        (ya, ma).cmp(&(yb, mb))
+    });
+
+    let metadata = serde_json::json!({
+        "version": "1.0",
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "total_changesets": total_count,
+        "partition_count": partition_counts.len(),
+        "partitions": partitions
+    });
+
+    writeln!(file, "{}", serde_json::to_string_pretty(&metadata)?)?;
+
+    println!("  Wrote metadata.json");
 
     Ok(())
 }

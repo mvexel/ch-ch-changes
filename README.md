@@ -189,3 +189,30 @@ duckdb -c "SELECT user, COUNT(*) as changeset_count
            ORDER BY changeset_count DESC
            LIMIT 20"
 ```
+
+## Optimizing Remote Queries
+
+- Enable DuckDB’s HTTP/S3 support and local object cache so repeated scans reuse downloaded row groups:
+  ```sql
+  INSTALL httpfs;
+  LOAD httpfs;
+  SET s3_endpoint='https://<account>.r2.cloudflarestorage.com';
+  SET s3_region='auto';
+  SET s3_access_key_id='<key>';
+  SET s3_secret_access_key='<secret>';
+  SET enable_object_cache=true;
+  ```
+- The converter writes ~100 k-row groups (`src/main.rs:20`, `src/main.rs:74`), so predicates that line up with Parquet statistics (`created_at`, `uid`, bbox columns) prune most network transfers. Prefer selective filters like `WHERE created_at >= '2024-01-01'` or restricting the bounding box.
+- Text searches such as `description ILIKE '%foo%'` must touch every row group. For repeated keyword searches, cache locally (`duckdb -c "COPY (SELECT …) TO 'local.duckdb';"`) or materialize a smaller subset.
+- Heavy time-based workloads can benefit from partitioned Parquet. After converting, use DuckDB to rewrite by year/month:
+  ```sql
+  COPY (
+    SELECT *,
+           strftime('%Y', to_timestamp(created_at/1000)) AS created_year,
+           strftime('%m', to_timestamp(created_at/1000)) AS created_month
+    FROM 'changesets-latest.parquet'
+  ) TO 's3://osm-changesets/changesets_by_month'
+    (FORMAT 'parquet', PARTITION_BY (created_year, created_month),
+     COMPRESSION 'ZSTD', ROW_GROUP_SIZE 500000, OVERWRITE_OR_IGNORE);
+  ```
+  Consumers can then query only the partitions they need, e.g. `read_parquet('s3://osm-changesets/changesets_by_month/created_year=2024/created_month=05/*.parquet')`.
