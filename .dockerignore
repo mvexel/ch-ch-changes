@@ -1,0 +1,9 @@
+# Don't copy these to Docker build context
+target/
+.git/
+.github/
+*.md
+data/
+deploy/
+.DS_Store
+*.parquet

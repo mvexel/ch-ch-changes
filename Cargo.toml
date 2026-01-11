@@ -3,6 +3,14 @@ name = "changesets-to-parquet"
 version = "0.1.1"
 edition = "2021"
 
+[[bin]]
+name = "changesets-to-parquet"
+path = "src/main.rs"
+
+[[bin]]
+name = "changeset-server"
+path = "api/main.rs"
+
 [dependencies]
 quick-xml = "0.36"
 parquet = "53"
@@ -26,7 +34,4 @@ moka = { version = "0.12", features = ["future"] }
 
 [dev-dependencies]
 tempfile = "3.10"
-
-[[bin]]
-name = "changeset-server"
-path = "api/main.rs"
+reqwest = { version = "0.12", features = ["json"] }
