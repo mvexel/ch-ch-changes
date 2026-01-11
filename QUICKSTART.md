@@ -36,6 +36,23 @@ flyctl deploy
 
 ### 3. Upload Your Data (varies)
 
+**Option A: Direct sync from local machine (Recommended)**
+
+```bash
+# Configure rclone with Fly.io SFTP backend
+rclone config
+# Choose: sftp
+# Host: [your-app-name].fly.dev
+# User: root
+# Port: 22
+# Auth: Use flyctl ssh (leave key_file empty)
+
+# Sync directly from R2 to Fly.io (runs on your machine)
+rclone sync r2:your-bucket/changesets/ flyio:/data/changesets/ --progress
+```
+
+**Option B: SSH into VM and sync from there**
+
 ```bash
 # SSH into the VM
 flyctl ssh console
