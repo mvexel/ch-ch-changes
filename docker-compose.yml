@@ -2,7 +2,10 @@ version: '3.8'
 
 services:
   api:
-    image: registry.osm.lol/changeset-api:latest
+    image: changeset-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.server
     container_name: changeset-api
     restart: unless-stopped
     environment:
@@ -45,7 +48,10 @@ services:
       - changeset-network
 
   builder:
-    image: registry.osm.lol/changeset-builder:latest
+    image: changeset-builder:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.builder
     container_name: changeset-builder
     environment:
       - DATA_PATH=/data/changesets
