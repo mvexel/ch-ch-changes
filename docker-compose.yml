@@ -42,8 +42,10 @@ services:
       - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./static:/srv:ro  # Homepage
       - caddy-data:/data
       - caddy-config:/config
+      - changeset-data:/data/changesets:ro  # Read-only access to parquet files
     networks:
       - changeset-network
 
