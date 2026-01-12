@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile.server
+    image: registry.osm.lol/changeset-api:latest
     container_name: changeset-api
     restart: unless-stopped
     environment:
@@ -49,9 +47,7 @@ services:
       - api
 
   builder:
-    build:
-      context: .
-      dockerfile: Dockerfile.builder
+    image: registry.osm.lol/changeset-builder:latest
     container_name: changeset-builder
     environment:
       - DATA_PATH=/data/changesets
@@ -62,6 +58,17 @@ services:
     profiles:
       - manual
 
+  registry:
+    image: registry:2
+    container_name: changeset-registry
+    restart: unless-stopped
+    volumes:
+      - registry-data:/var/lib/registry
+    networks:
+      - changeset-network
+    expose:
+      - "5000"
+
 volumes:
   changeset-data:
     driver: local
@@ -71,6 +78,7 @@ volumes:
       device: /opt/changeset-data
   caddy-data:
   caddy-config:
+  registry-data:
 
 networks:
   changeset-network:

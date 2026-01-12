@@ -26,3 +26,25 @@ changesets.yourdomain.com {
         -Server
     }
 }
+
+# Docker registry (public with auth)
+registry.osm.lol {
+    # Generate hash: caddy hash-password --plaintext 'your-password'
+    basicauth {
+        registry_user REPLACE_WITH_HASH
+    }
+
+    reverse_proxy registry:5000
+
+    log {
+        output file /var/log/caddy/registry-access.log
+        format json
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        -Server
+    }
+}
