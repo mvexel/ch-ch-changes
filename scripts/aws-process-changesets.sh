@@ -119,6 +119,7 @@ apt-get install -y docker.io
 
 echo "[$(date)] Creating directories..."
 mkdir -p /data/changesets /app
+chown ubuntu:ubuntu /app /data
 
 echo "[$(date)] Docker installation complete, ready for builds"
 EOF
