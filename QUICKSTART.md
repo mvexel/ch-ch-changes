@@ -53,21 +53,27 @@ nano docker-compose.yml
 ## Step 3: Build and Push Images (on your build machine)
 
 You only need to do this when you release a new version.
-Make sure your registry stack is already running and reachable.
 
 ```bash
-# Build and push images to your registry
-docker build -f Dockerfile.server -t registry.yourdomain.com/changeset-api:latest .
-docker build -f Dockerfile.builder -t registry.yourdomain.com/changeset-builder:latest .
-docker push registry.yourdomain.com/changeset-api:latest
-docker push registry.yourdomain.com/changeset-builder:latest
+# Build both images
+docker build -f Dockerfile.server -t registry.osm.lol/changeset-api:latest .
+docker build -f Dockerfile.builder -t registry.osm.lol/changeset-builder:latest .
+
+# Push to registry
+docker login registry.osm.lol
+docker push registry.osm.lol/changeset-api:latest
+docker push registry.osm.lol/changeset-builder:latest
 ```
+
+**Building from Apple Silicon (M1/M2/M3)?** Add `--platform linux/amd64` to the build commands since your VPS runs x86_64.
+
+**Using Tailscale?** Replace `registry.osm.lol` with your Tailscale IP (e.g., `100.64.1.123:5000`). You may need to add it to Docker's insecure-registries in Settings → Docker Engine.
 
 ## Step 4: Pull and Start Services (on the server)
 
 ```bash
 # Log in to your registry and pull images
-docker login registry.yourdomain.com
+docker login registry.osm.lol
 docker compose pull
 docker compose up -d
 ```
