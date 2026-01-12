@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSM Changeset API</title>
+    <style>
+        body {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            font-family: system-ui, -apple-system, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1 { border-bottom: 2px solid #333; padding-bottom: 10px; }
+        h2 { margin-top: 30px; color: #555; }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        pre code { background: none; padding: 0; }
+        a { color: #0066cc; }
+        .endpoint { color: #008800; font-weight: bold; }
+        ul { padding-left: 20px; }
+    </style>
+</head>
+<body>
+    <h1>OSM Changeset API</h1>
+
+    <p>Query OpenStreetMap changeset data via REST API or direct DuckDB access to parquet files.</p>
+
+    <h2>API Endpoints</h2>
+
+    <p><span class="endpoint">GET /health</span> - Health check</p>
+    <pre><code>curl https://DOMAIN/health</code></pre>
+
+    <p><span class="endpoint">GET /changeset/{id}.json</span> - Single changeset</p>
+    <pre><code>curl https://DOMAIN/changeset/1.json</code></pre>
+
+    <p><span class="endpoint">GET /changesets/day/{YYYY-MM-DD}</span> - All changesets on a date</p>
+    <pre><code>curl https://DOMAIN/changesets/day/2024-01-15</code></pre>
+
+    <p><span class="endpoint">GET /changesets/from/{start}/to/{end}</span> - Date range</p>
+    <pre><code>curl https://DOMAIN/changesets/from/2024-01-01/to/2024-01-31</code></pre>
+
+    <p><span class="endpoint">GET /meta/tip</span> - Latest changeset ID</p>
+    <pre><code>curl https://DOMAIN/meta/tip</code></pre>
+
+    <p><span class="endpoint">GET /meta/coverage</span> - Available date range</p>
+    <pre><code>curl https://DOMAIN/meta/coverage</code></pre>
+
+    <h2>Direct DuckDB Access</h2>
+
+    <p>Query parquet files directly for analytics without API limits:</p>
+
+    <p><a href="/data/">Browse parquet files →</a></p>
+
+    <pre><code># Example: Count changesets in 2024
+duckdb -c "
+  SELECT COUNT(*)
+  FROM read_parquet('https://DOMAIN/data/changesets_2024_*.parquet')
+"</code></pre>
+
+    <pre><code># Example: Top contributors
+duckdb -c "
+  SELECT user, COUNT(*) as changesets
+  FROM read_parquet('https://DOMAIN/data/changesets_2024_*.parquet')
+  GROUP BY user
+  ORDER BY changesets DESC
+  LIMIT 10
+"</code></pre>
+
+    <h2>Python Example</h2>
+
+    <pre><code>import duckdb
+
+# Query remote parquet
+result = duckdb.sql("""
+    SELECT
+        DATE_TRUNC('day', created_at) as day,
+        COUNT(*) as changesets
+    FROM read_parquet('https://DOMAIN/data/changesets_2024_*.parquet')
+    GROUP BY day
+    ORDER BY day
+""").df()
+
+print(result)</code></pre>
+
+    <h2>Data Schema</h2>
+
+    <p>Each changeset includes:</p>
+    <ul>
+        <li><code>id</code> - Changeset ID (integer)</li>
+        <li><code>created_at</code> - Timestamp</li>
+        <li><code>closed_at</code> - Timestamp (if closed)</li>
+        <li><code>open</code> - Boolean</li>
+        <li><code>user</code> - Username (string)</li>
+        <li><code>uid</code> - User ID (integer)</li>
+        <li><code>num_changes</code> - Number of edits</li>
+        <li><code>comments_count</code> - Number of comments</li>
+        <li><code>bbox</code> - Bounding box (struct)</li>
+        <li><code>tags</code> - Key-value tags (map)</li>
+    </ul>
+
+    <h2>Rate Limits</h2>
+
+    <p><strong>API:</strong> Standard web server limits apply</p>
+    <p><strong>DuckDB:</strong> No rate limits, query directly from parquet files</p>
+
+    <h2>Source Code</h2>
+
+    <p>This service is open source: <a href="https://github.com/yourusername/changesets-to-parquet">GitHub</a></p>
+
+    <h2>Data Updates</h2>
+
+    <p>Changeset data is updated weekly. Check <code>/meta/coverage</code> for latest available date.</p>
+
+    <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;">
+
+    <p style="color: #666; font-size: 0.9em;">
+        Data from <a href="https://www.openstreetmap.org">OpenStreetMap</a> © OpenStreetMap contributors,
+        available under the <a href="https://opendatacommons.org/licenses/odbl/">Open Database License</a>.
+    </p>
+</body>
+</html>

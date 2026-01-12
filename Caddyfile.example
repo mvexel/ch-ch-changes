@@ -16,7 +16,23 @@
 # }
 
 changesets.yourdomain.com {
-    reverse_proxy api:3000
+    # Homepage
+    handle / {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+
+    # Direct access to parquet files for DuckDB queries
+    handle_path /data/* {
+        root * /data/changesets
+        file_server browse
+    }
+
+    # API endpoints (catch-all for everything else)
+    handle {
+        reverse_proxy api:3000
+    }
 
     encode gzip zstd
 
@@ -30,5 +46,8 @@ changesets.yourdomain.com {
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
         -Server
+        # Allow CORS for DuckDB client-side queries
+        Access-Control-Allow-Origin "*"
+        Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
     }
 }
