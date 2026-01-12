@@ -1,142 +1,264 @@
-# 🚀 Quick Start - Deploy to Fly.io in 15 Minutes
+# Quickstart: Deploy on Hetzner
 
-## What We've Set Up
+This guide walks you through deploying the OSM Changeset API on a Hetzner VPS using Docker Compose.
 
-✅ **Dockerfile** - Multi-stage build for optimal image size
-✅ **fly.toml** - Fly.io configuration (2 vCPU, 2GB RAM, 100GB volume)
-✅ **.dockerignore** - Exclude unnecessary files from Docker build
-✅ **DEPLOY_FLYIO.md** - Detailed deployment guide
+## Prerequisites
 
-## Your 3-Step Deployment
+- Hetzner VPS (CPX31 recommended: 4 vCPU, 8GB RAM, 160GB disk)
+- Domain name pointed to your server IP (optional but recommended for HTTPS)
+- SSH access to your server
 
-### 1. Install Fly CLI (1 minute)
+## Step 1: Prepare the Server
 
-```bash
-# macOS
-brew install flyctl
-
-# Authenticate
-flyctl auth login
-```
-
-### 2. Create & Deploy App (5 minutes)
+SSH into your Hetzner server and run:
 
 ```bash
-cd /Users/mvexel/dev/changesets-to-parquet
+# Update system
+apt update && apt upgrade -y
 
-# Launch (creates app but doesn't deploy yet)
-flyctl launch --no-deploy
+# Install Docker and Docker Compose
+curl -fsSL https://get.docker.com | sh
+apt install -y docker-compose-plugin
 
-# Create storage volume for parquet data
-flyctl volumes create changeset_data --size 100 --region iad
+# Create directory structure
+mkdir -p /opt/changeset-app
+mkdir -p /opt/changeset-data/{changesets,downloads,temp_changesets}
+mkdir -p /var/log/changeset
 
-# Deploy!
-flyctl deploy
+# Configure firewall
+ufw allow ssh
+ufw allow http
+ufw allow https
+ufw enable
 ```
 
-### 3. Upload Your Data (varies)
-
-**Option A: Direct sync from local machine (Recommended)**
+## Step 2: Clone and Deploy
 
 ```bash
-# Configure rclone with Fly.io SFTP backend
-rclone config
-# Choose: sftp
-# Host: [your-app-name].fly.dev
-# User: root
-# Port: 22
-# Auth: Use flyctl ssh (leave key_file empty)
+# Clone the repository
+cd /opt/changeset-app
+git clone https://github.com/yourusername/changesets-to-parquet.git .
 
-# Sync directly from R2 to Fly.io (runs on your machine)
-rclone sync r2:your-bucket/changesets/ flyio:/data/changesets/ --progress
+# Update Caddyfile with your domain or IP
+# Edit the Caddyfile and replace:
+# - changesets.yourdomain.com with your actual domain
+# - your-email@example.com with your email for Let's Encrypt
+nano Caddyfile
+
+# Build and start services
+docker compose build
+docker compose up -d
 ```
 
-**Option B: SSH into VM and sync from there**
+## Step 3: Initial Data Load
+
+The first time you deploy, you need to download and process the OSM changeset data:
 
 ```bash
-# SSH into the VM
-flyctl ssh console
+# This will download ~7.6GB and process to ~15GB Parquet files
+# Estimated time: 1-2 hours
+docker compose run --rm builder
 
-# Inside the VM, install rclone
-apt update && apt install rclone -y
-
-# Configure rclone for your R2 bucket
-rclone config
-
-# Sync your parquet data
-rclone sync r2:your-bucket/changesets/ /data/changesets/ --progress
-
-# Exit
-exit
+# Monitor progress
+docker compose logs -f changeset-builder
 ```
 
-## Test Your API
+## Step 4: Set Up Weekly Automation
+
+Create a systemd service to run the builder weekly:
 
 ```bash
-# Get your URL
-flyctl info
+# Create service file
+cat > /etc/systemd/system/changeset-builder.service << 'EOF'
+[Unit]
+Description=OSM Changeset Builder
+After=docker.service
+Requires=docker.service
 
-# Test it
-APP_URL="https://your-app-name.fly.dev"
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/changeset-app
+ExecStart=/usr/bin/docker compose run --rm builder
+StandardOutput=append:/var/log/changeset/builder-%Y%m%d.log
+StandardError=append:/var/log/changeset/builder-%Y%m%d.log
+MemoryMax=7.5G
+TimeoutStartSec=6h
 
-curl $APP_URL/health
-curl $APP_URL/meta/tip
-curl "$APP_URL/changeset/1.json"
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create timer file
+cat > /etc/systemd/system/changeset-builder.timer << 'EOF'
+[Unit]
+Description=Weekly OSM Changeset Processing
+Requires=changeset-builder.service
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Enable and start timer
+systemctl daemon-reload
+systemctl enable changeset-builder.timer
+systemctl start changeset-builder.timer
+
+# Verify timer is scheduled
+systemctl list-timers | grep changeset
 ```
 
-## What You Get
+## Step 5: Verify Deployment
 
-- **Live API** at `https://your-app-name.fly.dev`
-- **Automatic SSL** certificate
-- **Health monitoring** (Fly.io checks /health every 30s)
-- **Persistent storage** (100GB volume for parquet data)
+```bash
+# Check API health
+curl http://localhost:3000/health
+
+# If you configured a domain with HTTPS:
+curl https://changesets.yourdomain.com/health
+
+# Check running containers
+docker compose ps
+
+# View API logs
+docker compose logs api
+
+# Check resource usage
+docker stats
+```
+
+## Testing Without a Domain
+
+If you don't have a domain set up yet, you can test with the server's IP address:
+
+1. Edit `Caddyfile` and comment out the domain section
+2. Uncomment the IP-based configuration:
+```
+http://YOUR.SERVER.IP.ADDRESS {
+    reverse_proxy api:3000
+}
+```
+3. Restart Caddy: `docker compose restart caddy`
+4. Access the API at: `http://YOUR.SERVER.IP.ADDRESS/health`
+
+## Monitoring and Maintenance
+
+### Check API Status
+```bash
+curl https://changesets.yourdomain.com/health
+docker compose logs -f api
+```
+
+### Check Builder Status
+```bash
+systemctl status changeset-builder.timer
+journalctl -u changeset-builder.service -n 50
+```
+
+### Manual Builder Run
+```bash
+cd /opt/changeset-app
+docker compose run --rm builder
+```
+
+### View Disk Usage
+```bash
+df -h /opt/changeset-data
+docker system df
+```
+
+### View Logs
+```bash
+# API logs
+docker compose logs api
+
+# Caddy logs
+docker compose logs caddy
+
+# Builder logs
+ls -lh /var/log/changeset/
+```
+
+## Troubleshooting
+
+### API won't start
+```bash
+# Check logs
+docker compose logs api
+
+# Verify data directory exists
+ls -lh /opt/changeset-data/changesets/
+
+# Rebuild if needed
+docker compose build --no-cache api
+docker compose up -d api
+```
+
+### Caddy SSL issues
+```bash
+# Check logs
+docker compose logs caddy
+
+# Verify DNS is pointing to your server
+dig changesets.yourdomain.com
+
+# Ensure ports 80 and 443 are open
+ufw status
+```
+
+### Builder fails
+```bash
+# Check disk space
+df -h
+
+# Check memory
+free -h
+
+# View detailed logs
+docker compose run --rm builder
+```
+
+## Resource Usage
+
+**Normal operation:**
+- API: ~500MB-1GB RAM
+- Caddy: ~50-100MB RAM
+- Disk: ~15GB for Parquet files
+
+**During weekly builder run:**
+- Builder: ~6-7GB RAM
+- Temporary disk usage: ~52GB (cleaned up after processing)
+
+## API Endpoints
+
+Once deployed, your API will be available at:
+
+- **Health check:** `GET /health`
+- **Latest changeset:** `GET /meta/tip`
+- **Coverage info:** `GET /meta/coverage`
+- **Single changeset:** `GET /changeset/{id}.json`
+- **Daily changesets:** `GET /changesets/day/{YYYY-MM-DD}`
+- **Date range:** `GET /changesets/from/{start}/to/{end}`
+
+Example:
+```bash
+curl https://changesets.yourdomain.com/changeset/1.json
+```
 
 ## Cost
 
-~$27-30/month for:
-- 2 vCPU, 2GB RAM VM (always-on)
-- 100GB persistent storage
-- Unlimited bandwidth
+Running on Hetzner CPX31: ~€13.17/month (~$14.50/month)
 
-## Important Files
+## Next Steps
 
-- **fly.toml** - Fly.io config (edit app name, region, resources)
-- **Dockerfile** - Docker build instructions
-- **DEPLOY_FLYIO.md** - Complete deployment guide with troubleshooting
+- Set up monitoring (optional)
+- Configure backups (optional)
+- Set up log rotation
+- Consider adding Prometheus/Grafana for metrics
 
-## Next Steps After Deploy
-
-1. Test all endpoints
-2. Monitor logs: `flyctl logs --follow`
-3. Check metrics: `flyctl dashboard`
-4. Add custom domain (optional): `flyctl certs add yourdomain.com`
-
-## Problems?
-
-```bash
-# Check status
-flyctl status
-
-# View logs
-flyctl logs
-
-# SSH into VM
-flyctl ssh console
-
-# Restart app
-flyctl apps restart
-```
-
-## Need to Update?
-
-```bash
-# After making code changes:
-flyctl deploy
-
-# Force rebuild:
-flyctl deploy --no-cache
-```
-
----
-
-**Read DEPLOY_FLYIO.md for the complete guide!**
+For more detailed information, see the main README.md

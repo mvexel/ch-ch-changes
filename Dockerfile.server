@@ -18,8 +18,9 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY api ./api
 
-# Build the API server in release mode
-RUN cargo build --release --bin changeset-server
+# Build both the API server and the CLI tool in release mode
+RUN cargo build --release --bin changeset-server && \
+    cargo build --release --bin changesets-to-parquet
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -31,10 +32,13 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     libstdc++6 \
+    wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the binary from builder
+# Copy both binaries from builder
 COPY --from=builder /app/target/release/changeset-server /usr/local/bin/changeset-server
+COPY --from=builder /app/target/release/changesets-to-parquet /usr/local/bin/changesets-to-parquet
 
 # Create data directory
 RUN mkdir -p /data/changesets
