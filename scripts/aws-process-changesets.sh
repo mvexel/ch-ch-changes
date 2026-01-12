@@ -259,14 +259,14 @@ if [ "$PROCESSING_FAILED" != true ]; then
 
     # Start the processing container in background
     ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ubuntu@$PUBLIC_IP \
-        "sudo docker run --rm -v /data:/data changeset-builder:latest > /var/log/processing.log 2>&1 && touch /tmp/processing-complete" &
+        "sudo docker run --rm -v /data:/data changeset-builder:latest > /tmp/processing.log 2>&1 && touch /tmp/processing-complete" &
 
     # Start log tailing if requested
     if [ "$FOLLOW_LOGS" = true ]; then
         log "Streaming logs..."
         sleep 5  # Give container time to start
         ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ubuntu@$PUBLIC_IP \
-            "tail -f /var/log/processing.log 2>/dev/null || echo 'Waiting for logs...'; sleep infinity" &
+            "tail -f /tmp/processing.log 2>/dev/null || echo 'Waiting for logs...'; sleep infinity" &
         LOG_TAIL_PID=$!
     fi
 fi
