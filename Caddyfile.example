@@ -1,0 +1,34 @@
+# Caddyfile.example - Example Caddy configuration
+# Copy this to 'Caddyfile' and customize for your deployment:
+#   cp Caddyfile.example Caddyfile
+#
+# The actual 'Caddyfile' is gitignored so your customizations won't be tracked.
+
+{
+    email your-email@example.com
+    admin off
+}
+
+# Replace with your actual domain
+# For testing with IP address only, use:
+# http://5.161.255.103 {
+#     reverse_proxy api:3000
+# }
+
+changesets.yourdomain.com {
+    reverse_proxy api:3000
+
+    encode gzip zstd
+
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        -Server
+    }
+}
