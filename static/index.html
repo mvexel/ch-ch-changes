@@ -38,6 +38,15 @@
 
     <p>Query OpenStreetMap changeset data via REST API or direct DuckDB access to parquet files.</p>
 
+    <p>This service is useful if you want to retrieve metadata for a non-trivial subset of OSM changeset metadata.
+        OSM lets you retrieve up to 100 at the time using the OSM API (<a href="https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets">docs</a>).
+        This service lets you query by minute, hour, day and even day ranges.
+    </p>
+
+    <h3>Data Updates</h3>
+
+    <p>Changeset data is updated weekly using the canonical changeset archive file OSM makes available. Check the <code>/meta/coverage</code> endpoint for the latest available date.</p>
+
     <h2>API Endpoints</h2>
 
     <p><span class="endpoint">GET /health</span> - Health check</p>
@@ -47,10 +56,13 @@
     <pre><code>curl https://DOMAIN/changeset/1.json</code></pre>
 
     <p><span class="endpoint">GET /changesets/day/{YYYY-MM-DD}</span> - All changesets on a date</p>
-    <pre><code>curl https://DOMAIN/changesets/day/2024-01-15</code></pre>
+    <pre><code>curl https://DOMAIN/changesets/day/20240115</code></pre>
 
-    <p><span class="endpoint">GET /changesets/from/{start}/to/{end}</span> - Date range</p>
-    <pre><code>curl https://DOMAIN/changesets/from/2024-01-01/to/2024-01-31</code></pre>
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}/[minute/{MM}]</span> - All changesets on a date and time.</p>
+    <pre><code>curl https://DOMAIN/changesets/day/20240115/hour/23/minute/59</code></pre>
+
+    <p><span class="endpoint">GET /changesets/from/{start}/to/{end}</span> - Date range (only handles entire days) <strong>response can be huge!</strong></p>
+    <pre><code>curl https://DOMAIN/changesets/from/20240101/to/20240131</code></pre>
 
     <p><span class="endpoint">GET /meta/tip</span> - Latest changeset ID</p>
     <pre><code>curl https://DOMAIN/meta/tip</code></pre>
@@ -60,7 +72,7 @@
 
     <h2>Direct DuckDB Access</h2>
 
-    <p>Query parquet files directly for analytics without API limits:</p>
+    <p>Query parquet files directly. The parquet data is partitioned by year and month.</p>
 
     <p><a href="/data/">Browse parquet files →</a></p>
 
@@ -113,16 +125,8 @@ print(result)</code></pre>
 
     <h2>Rate Limits</h2>
 
-    <p><strong>API:</strong> Standard web server limits apply</p>
-    <p><strong>DuckDB:</strong> No rate limits, query directly from parquet files</p>
+    <p>None currently.
 
-    <h2>Source Code</h2>
-
-    <p>This service is open source: <a href="https://github.com/yourusername/changesets-to-parquet">GitHub</a></p>
-
-    <h2>Data Updates</h2>
-
-    <p>Changeset data is updated weekly. Check <code>/meta/coverage</code> for latest available date.</p>
 
     <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;">
 
