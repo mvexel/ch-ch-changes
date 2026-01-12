@@ -1,9 +1,10 @@
 //! Response formatters
 //!
-//! Implements formatters for different response formats (XML, JSON).
+//! Implements formatters for different response formats (XML, JSON, JSONL).
 
 pub mod xml;
 pub mod json;
+pub mod jsonl;
 
 use crate::models::Changeset;
 
@@ -25,6 +26,7 @@ pub trait Formatter {
 pub enum FormatType {
     Xml,
     Json,
+    JsonLines,
 }
 
 impl FormatType {
@@ -36,6 +38,7 @@ impl FormatType {
         match s.to_lowercase().as_str() {
             "xml" => Some(FormatType::Xml),
             "json" => Some(FormatType::Json),
+            "jsonl" | "jsonlines" => Some(FormatType::JsonLines),
             _ => None,
         }
     }

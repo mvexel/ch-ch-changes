@@ -7,6 +7,8 @@ use crate::format::Formatter;
 use chrono::{TimeZone, Utc, SecondsFormat};
 use std::borrow::Cow;
 
+const OSM_ROOT_OPEN: &str = "<osm version=\"0.6\" generator=\"changeset-historic-api/0.1.0\" copyright=\"OpenStreetMap and contributors\" attribution=\"http://www.openstreetmap.org/copyright\" license=\"http://opendatacommons.org/licenses/odbl/1-0/\">\n";
+
 /// XML formatter for OSM changeset output
 pub struct XmlFormatter;
 
@@ -81,8 +83,8 @@ impl XmlFormatter {
             xml.push_str(&format!(" max_lon=\"{}\"", max_lon));
         }
 
-        xml.push_str(&format!(" num_changes=\"{}\"", changeset.num_changes));
         xml.push_str(&format!(" comments_count=\"{}\"", changeset.comments_count));
+        xml.push_str(&format!(" changes_count=\"{}\"", changeset.num_changes));
 
         let tags = self.collect_tags(changeset);
         if tags.is_empty() {
@@ -128,7 +130,7 @@ impl XmlFormatter {
 impl Formatter for XmlFormatter {
     fn format_changeset(&self, changeset: &Changeset) -> Result<String, Box<dyn std::error::Error>> {
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str("<osm version=\"0.6\" generator=\"changeset-historic-api/0.1.0\">\n");
+        xml.push_str(OSM_ROOT_OPEN);
         xml.push_str(&self.format_changeset_element(changeset));
         xml.push_str("</osm>");
         Ok(xml)
@@ -136,7 +138,7 @@ impl Formatter for XmlFormatter {
 
     fn format_changesets(&self, changesets: &[Changeset]) -> Result<String, Box<dyn std::error::Error>> {
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str("<osm version=\"0.6\" generator=\"changeset-historic-api/0.1.0\">\n");
+        xml.push_str(OSM_ROOT_OPEN);
         for changeset in changesets {
             xml.push_str(&self.format_changeset_element(changeset));
         }
@@ -199,5 +201,16 @@ mod tests {
         let xml = formatter.format_changeset(&changeset).expect("xml");
 
         assert!(xml.contains("v=\"A &amp; B &lt; C\""));
+    }
+
+    #[test]
+    fn test_root_attributes_present() {
+        let changeset = build_changeset(4, None, HashMap::new());
+        let formatter = XmlFormatter::new();
+        let xml = formatter.format_changeset(&changeset).expect("xml");
+
+        assert!(xml.contains("copyright=\"OpenStreetMap and contributors\""));
+        assert!(xml.contains("attribution=\"http://www.openstreetmap.org/copyright\""));
+        assert!(xml.contains("license=\"http://opendatacommons.org/licenses/odbl/1-0/\""));
     }
 }

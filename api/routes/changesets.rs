@@ -13,6 +13,7 @@ use crate::query::engine::QueryFilters;
 use crate::format::{
     xml::XmlFormatter,
     json::JsonFormatter,
+    jsonl::JsonLinesFormatter,
     Formatter,
 };
 
@@ -48,12 +49,34 @@ impl QueryParams {
     }
 }
 
+fn extract_extension(s: &str) -> (&str, Option<String>) {
+    if let Some(stripped) = s.strip_suffix(".json") {
+        (stripped, Some("json".to_string()))
+    } else if let Some(stripped) = s.strip_suffix(".jsonl") {
+        (stripped, Some("jsonl".to_string()))
+    } else if let Some(stripped) = s.strip_suffix(".xml") {
+        (stripped, Some("xml".to_string()))
+    } else {
+        (s, None)
+    }
+}
+
 fn format_response(changesets: &[Changeset], format: Option<&str>, pretty: bool) -> Response {
     match format {
         Some("json") => {
             let formatter = JsonFormatter::new(pretty);
             match formatter.format_changesets(changesets) {
                 Ok(json) => ([(header::CONTENT_TYPE, "application/json")], json).into_response(),
+                Err(e) => {
+                    tracing::error!("Formatting error: {}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                }
+            }
+        }
+        Some("jsonl") | Some("jsonlines") => {
+            let formatter = JsonLinesFormatter::new();
+            match formatter.format_changesets(changesets) {
+                Ok(jsonl) => ([(header::CONTENT_TYPE, "application/x-ndjson")], jsonl).into_response(),
                 Err(e) => {
                     tracing::error!("Formatting error: {}", e);
                     StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -75,10 +98,15 @@ fn format_response(changesets: &[Changeset], format: Option<&str>, pretty: bool)
 
 pub async fn get_changesets_by_day(
     State(state): State<AppState>,
-    Path(date_str): Path<String>,
-    Query(params): Query<QueryParams>,
+    Path(date_str_raw): Path<String>,
+    Query(mut params): Query<QueryParams>,
 ) -> Response {
-    let date = match NaiveDate::parse_from_str(&date_str, "%Y%m%d") {
+    let (date_str, ext_format) = extract_extension(&date_str_raw);
+    if params.format.is_none() {
+        params.format = ext_format;
+    }
+
+    let date = match NaiveDate::parse_from_str(date_str, "%Y%m%d") {
         Ok(d) => d,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
@@ -148,13 +176,18 @@ async fn handle_date_range(
 
 pub async fn get_changesets_range(
     State(state): State<AppState>,
-    Path((start, end)): Path<(String, String)>,
-    Query(params): Query<QueryParams>,
+    Path((start, end_raw)): Path<(String, String)>,
+    Query(mut params): Query<QueryParams>,
 ) -> Response {
+    let (end, ext_format) = extract_extension(&end_raw);
+    if params.format.is_none() {
+        params.format = ext_format;
+    }
+
     if NaiveDate::parse_from_str(&start, "%Y%m%d").is_ok()
-        && NaiveDate::parse_from_str(&end, "%Y%m%d").is_ok()
+        && NaiveDate::parse_from_str(end, "%Y%m%d").is_ok()
     {
-        return handle_date_range(state, start, end, params).await;
+        return handle_date_range(state, start, end.to_string(), params).await;
     }
 
     if let (Ok(start_id), Ok(end_id)) = (start.parse::<i64>(), end.parse::<i64>()) {
@@ -166,9 +199,14 @@ pub async fn get_changesets_range(
 
 pub async fn get_changesets_by_hour(
     State(state): State<AppState>,
-    Path((date_str, hour_str)): Path<(String, String)>,
-    Query(params): Query<QueryParams>,
+    Path((date_str, hour_str_raw)): Path<(String, String)>,
+    Query(mut params): Query<QueryParams>,
 ) -> Response {
+    let (hour_str, ext_format) = extract_extension(&hour_str_raw);
+    if params.format.is_none() {
+        params.format = ext_format;
+    }
+
     let date = match NaiveDate::parse_from_str(&date_str, "%Y%m%d") {
         Ok(d) => d,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -206,9 +244,14 @@ pub async fn get_changesets_by_hour(
 
 pub async fn get_changesets_by_minute(
     State(state): State<AppState>,
-    Path((date_str, hour_str, minute_str)): Path<(String, String, String)>,
-    Query(params): Query<QueryParams>,
+    Path((date_str, hour_str, minute_str_raw)): Path<(String, String, String)>,
+    Query(mut params): Query<QueryParams>,
 ) -> Response {
+    let (minute_str, ext_format) = extract_extension(&minute_str_raw);
+    if params.format.is_none() {
+        params.format = ext_format;
+    }
+
     let date = match NaiveDate::parse_from_str(&date_str, "%Y%m%d") {
         Ok(d) => d,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -498,5 +541,30 @@ mod tests {
         let value: Value = serde_json::from_slice(&body).expect("json");
         let changesets = value["changesets"].as_array().expect("changesets");
         assert_eq!(changesets.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_minute_jsonl_suffix() {
+        let (_dir, state) = setup_state();
+        let response = get_changesets_by_minute(
+            State(state),
+            Path(("20240501".to_string(), "00".to_string(), "00.jsonl".to_string())),
+            Query(QueryParams {
+                format: None,
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok());
+        assert_eq!(content_type, Some("application/x-ndjson"));
     }
 }

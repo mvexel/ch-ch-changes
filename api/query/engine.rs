@@ -44,7 +44,7 @@ impl QueryEngine {
 
     /// Helper to get the glob pattern for all parquet files
     fn get_glob_pattern(&self) -> String {
-        self.data_path.join("**/*.parquet").to_string_lossy().to_string()
+        self.data_path.join("year=*/**/*.parquet").to_string_lossy().to_string()
     }
 
     pub fn data_path(&self) -> &std::path::Path {
@@ -385,6 +385,10 @@ fn collect_parquet_files(dir: &Path, files: &mut Vec<PathBuf>) {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
+            // Skip the indexes directory
+            if path.file_name().and_then(|n| n.to_str()) == Some("indexes") {
+                continue;
+            }
             collect_parquet_files(&path, files);
         } else if path.extension().and_then(|ext| ext.to_str()) == Some("parquet") {
             files.push(path);
