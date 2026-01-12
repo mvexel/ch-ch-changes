@@ -189,6 +189,40 @@ if [ "$SSH_READY" = false ]; then
     exit 1
 fi
 
+# Wait for user-data to complete
+log "Waiting for user-data to complete..."
+for i in {1..60}; do
+    if ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ubuntu@$PUBLIC_IP "cloud-init status --wait" &>/dev/null; then
+        log "User-data complete!"
+        break
+    fi
+    if [ $((i % 6)) -eq 0 ]; then
+        log "Still waiting for user-data... (${i}/60 attempts)"
+    fi
+    sleep 10
+done
+
+# Verify /app exists and is writable
+if ! ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ubuntu@$PUBLIC_IP "test -w /app" &>/dev/null; then
+    log "ERROR: /app directory not ready"
+    PROCESSING_FAILED=true
+fi
+
+if [ "$PROCESSING_FAILED" = true ]; then
+    log "Fetching logs for debugging..."
+    ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ubuntu@$PUBLIC_IP \
+        "sudo cat /var/log/user-data.log" >> "$LOG_FILE" 2>&1 || true
+
+    if [ "$KEEP_ON_FAILURE" = true ]; then
+        log "Instance kept alive for 30 minutes for debugging at: $PUBLIC_IP"
+        log "SSH: ssh -i $SSH_KEY_PATH ubuntu@$PUBLIC_IP"
+        sleep 1800
+    fi
+
+    aws ec2 terminate-instances --region "$AWS_REGION" --instance-ids "$INSTANCE_ID" &>/dev/null
+    exit 1
+fi
+
 # Copy code to instance
 log "[4/7] Copying source code to instance..."
 if ! rsync -az --progress \
