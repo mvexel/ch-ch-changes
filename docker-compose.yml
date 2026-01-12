@@ -43,8 +43,6 @@ services:
       - caddy-config:/config
     networks:
       - changeset-network
-    depends_on:
-      - api
 
   builder:
     image: registry.osm.lol/changeset-builder:latest
@@ -58,17 +56,6 @@ services:
     profiles:
       - manual
 
-  registry:
-    image: registry:2
-    container_name: changeset-registry
-    restart: unless-stopped
-    volumes:
-      - registry-data:/var/lib/registry
-    networks:
-      - changeset-network
-    expose:
-      - "5000"
-
 volumes:
   changeset-data:
     driver: local
@@ -78,7 +65,6 @@ volumes:
       device: /opt/changeset-data
   caddy-data:
   caddy-config:
-  registry-data:
 
 networks:
   changeset-network:

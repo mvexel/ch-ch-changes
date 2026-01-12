@@ -1,5 +1,5 @@
 # Builder instance for processing OSM changeset archives
-FROM rust:slim-bookworm as builder
+FROM rust:slim-bookworm AS builder
 
 WORKDIR /app
 

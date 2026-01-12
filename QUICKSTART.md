@@ -32,25 +32,47 @@ ufw allow https
 ufw enable
 ```
 
-## Step 2: Clone and Deploy
+## Step 2: Clone and Configure
 
 ```bash
 # Clone the repository
 cd /opt/changeset-app
 git clone https://github.com/yourusername/changesets-to-parquet.git .
 
-# Update Caddyfile with your domain or IP
+# Update Caddyfile with your domain
 # Edit the Caddyfile and replace:
 # - changesets.yourdomain.com with your actual domain
 # - your-email@example.com with your email for Let's Encrypt
 nano Caddyfile
 
-# Build and start services
-docker compose build
+# Update docker-compose.yml image registry host
+# Example: registry.yourdomain.com -> registry.example.com
+nano docker-compose.yml
+```
+
+## Step 3: Build and Push Images (on your build machine)
+
+You only need to do this when you release a new version.
+Make sure your registry stack is already running and reachable.
+
+```bash
+# Build and push images to your registry
+docker build -f Dockerfile.server -t registry.yourdomain.com/changeset-api:latest .
+docker build -f Dockerfile.builder -t registry.yourdomain.com/changeset-builder:latest .
+docker push registry.yourdomain.com/changeset-api:latest
+docker push registry.yourdomain.com/changeset-builder:latest
+```
+
+## Step 4: Pull and Start Services (on the server)
+
+```bash
+# Log in to your registry and pull images
+docker login registry.yourdomain.com
+docker compose pull
 docker compose up -d
 ```
 
-## Step 3: Initial Data Load
+## Step 5: Initial Data Load
 
 The first time you deploy, you need to download and process the OSM changeset data:
 
@@ -63,7 +85,7 @@ docker compose run --rm builder
 docker compose logs -f changeset-builder
 ```
 
-## Step 4: Set Up Weekly Automation
+## Step 6: Set Up Weekly Automation
 
 Create a systemd service to run the builder weekly:
 
@@ -113,7 +135,7 @@ systemctl start changeset-builder.timer
 systemctl list-timers | grep changeset
 ```
 
-## Step 5: Verify Deployment
+## Step 7: Verify Deployment
 
 ```bash
 # Check API health
