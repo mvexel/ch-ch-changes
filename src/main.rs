@@ -39,7 +39,7 @@ struct Args {
     #[arg(long, default_value_t = false)]
     partition: bool,
 
-    /// Generate index files (user_stats.parquet, open_changesets.parquet)
+    /// Generate index files (user_stats.parquet, open_changesets.parquet, partition_stats.parquet)
     #[arg(long, default_value_t = false)]
     generate_indexes: bool,
 
@@ -221,6 +221,7 @@ struct PartitionedWriter {
     writers: HashMap<PartitionKey, ArrowWriter<File>>,
     builders: HashMap<PartitionKey, BatchBuilders>,
     partition_counts: HashMap<PartitionKey, usize>,
+    partition_stats: HashMap<PartitionKey, PartitionStats>,
 }
 
 impl PartitionedWriter {
@@ -241,6 +242,7 @@ impl PartitionedWriter {
             writers: HashMap::new(),
             builders: HashMap::new(),
             partition_counts: HashMap::new(),
+            partition_stats: HashMap::new(),
         })
     }
 
@@ -274,6 +276,7 @@ impl PartitionedWriter {
         };
 
         self.get_or_create_writer(&key)?;
+        self.update_partition_stats(&key, cs);
 
         let builders = self.builders.get_mut(&key).unwrap();
         builders.append(cs);
@@ -289,7 +292,7 @@ impl PartitionedWriter {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<HashMap<PartitionKey, usize>> {
+    fn finish(mut self) -> Result<PartitionSummary> {
         // Flush remaining data in all partitions
         for (key, mut builders) in self.builders.drain() {
             if !builders.is_empty() {
@@ -310,8 +313,67 @@ impl PartitionedWriter {
             );
         }
 
-        Ok(self.partition_counts)
+        Ok(PartitionSummary {
+            counts: self.partition_counts,
+            stats: self.partition_stats,
+        })
     }
+
+    fn update_partition_stats(&mut self, key: &PartitionKey, cs: &Changeset) {
+        use std::collections::hash_map::Entry;
+
+        match self.partition_stats.entry(key.clone()) {
+            Entry::Vacant(entry) => {
+                entry.insert(PartitionStats::from_changeset(cs));
+            }
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().update(cs);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct PartitionStats {
+    changeset_count: u64,
+    min_id: i64,
+    max_id: i64,
+    min_timestamp: Option<i64>,
+    max_timestamp: Option<i64>,
+}
+
+impl PartitionStats {
+    fn from_changeset(cs: &Changeset) -> Self {
+        Self {
+            changeset_count: 1,
+            min_id: cs.id,
+            max_id: cs.id,
+            min_timestamp: cs.created_at,
+            max_timestamp: cs.created_at,
+        }
+    }
+
+    fn update(&mut self, cs: &Changeset) {
+        self.changeset_count = self.changeset_count.saturating_add(1);
+        self.min_id = self.min_id.min(cs.id);
+        self.max_id = self.max_id.max(cs.id);
+
+        if let Some(ts) = cs.created_at {
+            self.min_timestamp = match self.min_timestamp {
+                Some(current) => Some(current.min(ts)),
+                None => Some(ts),
+            };
+            self.max_timestamp = match self.max_timestamp {
+                Some(current) => Some(current.max(ts)),
+                None => Some(ts),
+            };
+        }
+    }
+}
+
+struct PartitionSummary {
+    counts: HashMap<PartitionKey, usize>,
+    stats: HashMap<PartitionKey, PartitionStats>,
 }
 
 /// Tracks user statistics for index generation
@@ -873,11 +935,15 @@ fn main() -> Result<()> {
         };
 
         println!("\nFinalizing partitions...");
-        let partition_counts = partitioned_writer.finish()?;
+        let PartitionSummary {
+            counts: partition_counts,
+            stats: partition_stats,
+        } = partitioned_writer.finish()?;
 
         if let Some(collector) = index_collector {
             println!("\nWriting indexes...");
             collector.write_indexes(&output_dir, &schema)?;
+            write_partition_stats_index(&output_dir, &partition_stats)?;
         }
 
         println!(
@@ -929,6 +995,102 @@ fn main() -> Result<()> {
             total_count, output
         );
     }
+
+    Ok(())
+}
+
+fn write_partition_stats_index(
+    output_dir: &PathBuf,
+    stats: &HashMap<PartitionKey, PartitionStats>,
+) -> Result<()> {
+    if stats.is_empty() {
+        return Ok(());
+    }
+
+    let indexes_dir = output_dir.join("indexes");
+    fs::create_dir_all(&indexes_dir)?;
+
+    let file_path = indexes_dir.join("partition_stats.parquet");
+    let file = File::create(&file_path)?;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("path", DataType::Utf8, false),
+        Field::new("year", DataType::Int64, false),
+        Field::new("month", DataType::Int64, false),
+        Field::new("changeset_count", DataType::Int64, false),
+        Field::new("min_id", DataType::Int64, false),
+        Field::new("max_id", DataType::Int64, false),
+        Field::new("min_created_at", DataType::Int64, true),
+        Field::new("max_created_at", DataType::Int64, true),
+        Field::new("file_size_bytes", DataType::Int64, false),
+    ]));
+
+    let props = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .build();
+
+    let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(props))?;
+
+    let mut entries: Vec<_> = stats.iter().collect();
+    entries.sort_by_key(|(key, _)| (key.year, key.month));
+    let entry_count = entries.len();
+
+    let capacity = entry_count.max(1);
+    let mut path_builder = StringBuilder::with_capacity(capacity, capacity * 32);
+    let mut year_builder = Int64Builder::with_capacity(capacity);
+    let mut month_builder = Int64Builder::with_capacity(capacity);
+    let mut count_builder = Int64Builder::with_capacity(capacity);
+    let mut min_id_builder = Int64Builder::with_capacity(capacity);
+    let mut max_id_builder = Int64Builder::with_capacity(capacity);
+    let mut min_ts_builder = Int64Builder::with_capacity(capacity);
+    let mut max_ts_builder = Int64Builder::with_capacity(capacity);
+    let mut file_size_builder = Int64Builder::with_capacity(capacity);
+
+    for (key, stat) in entries {
+        let path = key.path();
+        let file_size_bytes = output_dir
+            .join(&path)
+            .metadata()
+            .map(|m| m.len() as i64)
+            .unwrap_or(0);
+
+        path_builder.append_value(path);
+        year_builder.append_value(key.year as i64);
+        month_builder.append_value(key.month as i64);
+        count_builder.append_value(stat.changeset_count as i64);
+        min_id_builder.append_value(stat.min_id);
+        max_id_builder.append_value(stat.max_id);
+        match stat.min_timestamp {
+            Some(ts) => min_ts_builder.append_value(ts),
+            None => min_ts_builder.append_null(),
+        }
+        match stat.max_timestamp {
+            Some(ts) => max_ts_builder.append_value(ts),
+            None => max_ts_builder.append_null(),
+        }
+        file_size_builder.append_value(file_size_bytes);
+    }
+
+    let columns: Vec<ArrayRef> = vec![
+        Arc::new(path_builder.finish()),
+        Arc::new(year_builder.finish()),
+        Arc::new(month_builder.finish()),
+        Arc::new(count_builder.finish()),
+        Arc::new(min_id_builder.finish()),
+        Arc::new(max_id_builder.finish()),
+        Arc::new(min_ts_builder.finish()),
+        Arc::new(max_ts_builder.finish()),
+        Arc::new(file_size_builder.finish()),
+    ];
+
+    let batch = RecordBatch::try_new(schema, columns)?;
+    writer.write(&batch)?;
+    writer.close()?;
+
+    println!(
+        "  Index partition_stats.parquet: {} partitions",
+        entry_count
+    );
 
     Ok(())
 }

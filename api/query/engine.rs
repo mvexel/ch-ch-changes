@@ -3,6 +3,7 @@
 //! Manages DuckDB connections and executes queries against Parquet files.
 
 use crate::models::Changeset;
+use crate::query::{PartitionResolver, QueryBuilder};
 use duckdb::{
     params,
     types::{TimeUnit, Value},
@@ -16,6 +17,7 @@ use std::sync::{Arc, Mutex};
 pub struct QueryEngine {
     conn: Arc<Mutex<Connection>>,
     data_path: PathBuf,
+    partition_resolver: PartitionResolver,
 }
 
 #[derive(Debug, Clone)]
@@ -36,9 +38,12 @@ impl QueryEngine {
         // Initialize parquet extension if needed (usually built-in)
         // conn.execute("INSTALL parquet; LOAD parquet;", [])?;
 
+        let partition_resolver = PartitionResolver::new(data_path)?;
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             data_path: PathBuf::from(data_path),
+            partition_resolver,
         })
     }
 
@@ -56,6 +61,15 @@ impl QueryEngine {
 
     /// Query a single changeset by ID
     pub fn get_changeset(&self, id: i64) -> Result<Option<Changeset>, Box<dyn std::error::Error>> {
+        if let Ok(partition) = self.partition_resolver.get_partition_for_id(id) {
+            let query = QueryBuilder::new()
+                .from_parquet(&partition)
+                .filter_id_range(id, id)
+                .build();
+            let mut results = self.execute_query_sql(&query)?;
+            return Ok(results.pop());
+        }
+
         let conn = self.conn.lock().unwrap();
         let glob = self.get_glob_pattern();
 
@@ -82,20 +96,26 @@ impl QueryEngine {
     ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
         let start_ts = chrono::DateTime::parse_from_rfc3339(start_date)?;
         let end_ts = chrono::DateTime::parse_from_rfc3339(end_date)?;
+        if start_ts > end_ts {
+            return Ok(Vec::new());
+        }
+
         let start_str = start_ts.naive_utc().format("%F %T").to_string();
         let end_str = end_ts.naive_utc().format("%F %T").to_string();
 
-        let base_query = "SELECT * FROM read_parquet(?, hive_partitioning=true) WHERE created_at >= CAST(? AS TIMESTAMP) AND created_at <= CAST(? AS TIMESTAMP)";
-        let (query, params) = self.apply_filters(base_query, filters);
+        let partitions = self
+            .partition_resolver
+            .get_partitions_for_date_range(start_date, end_date)?;
+        if partitions.is_empty() {
+            return Ok(Vec::new());
+        }
 
-        // Prepend the required params
-        let mut final_params = Vec::new();
-        final_params.push(duckdb::types::Value::Text(self.get_glob_pattern()));
-        final_params.push(duckdb::types::Value::Text(start_str));
-        final_params.push(duckdb::types::Value::Text(end_str));
-        final_params.extend(params);
-
-        self.execute_query(&query, final_params)
+        let mut builder = QueryBuilder::new()
+            .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
+            .filter_date_range(&start_str, &end_str);
+        builder = self.apply_filters_to_builder(builder, filters, true);
+        let query = builder.build();
+        self.execute_query_sql(&query)
     }
 
     /// Query changesets by ID range
@@ -105,17 +125,23 @@ impl QueryEngine {
         end_id: i64,
         filters: &QueryFilters,
     ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
-        let base_query =
-            "SELECT * FROM read_parquet(?, hive_partitioning=true) WHERE id >= ? AND id <= ?";
-        let (query, params) = self.apply_filters(base_query, filters);
+        if start_id > end_id {
+            return Ok(Vec::new());
+        }
 
-        let mut final_params = Vec::new();
-        final_params.push(duckdb::types::Value::Text(self.get_glob_pattern()));
-        final_params.push(duckdb::types::Value::BigInt(start_id));
-        final_params.push(duckdb::types::Value::BigInt(end_id));
-        final_params.extend(params);
+        let partitions = self
+            .partition_resolver
+            .get_partitions_for_id_range(start_id, end_id)?;
+        if partitions.is_empty() {
+            return Ok(Vec::new());
+        }
 
-        self.execute_query(&query, final_params)
+        let mut builder = QueryBuilder::new()
+            .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
+            .filter_id_range(start_id, end_id);
+        builder = self.apply_filters_to_builder(builder, filters, true);
+        let query = builder.build();
+        self.execute_query_sql(&query)
     }
 
     /// Query changesets by user
@@ -124,15 +150,12 @@ impl QueryEngine {
         username: &str,
         filters: &QueryFilters,
     ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
-        let base_query = "SELECT * FROM read_parquet(?, hive_partitioning=true) WHERE user = ?";
-        let (query, params) = self.apply_filters(base_query, filters);
-
-        let mut final_params = Vec::new();
-        final_params.push(duckdb::types::Value::Text(self.get_glob_pattern()));
-        final_params.push(duckdb::types::Value::Text(username.to_string()));
-        final_params.extend(params);
-
-        self.execute_query(&query, final_params)
+        let mut builder = QueryBuilder::new()
+            .from_parquet(&self.get_glob_pattern())
+            .filter_user(username);
+        builder = self.apply_filters_to_builder(builder, filters, false);
+        let query = builder.build();
+        self.execute_query_sql(&query)
     }
 
     /// Get the latest changeset ID available
@@ -244,61 +267,45 @@ impl QueryEngine {
             .collect())
     }
 
-    /// Apply filters to the query
-    fn apply_filters(
+    fn apply_filters_to_builder(
         &self,
-        base_query: &str,
+        mut builder: QueryBuilder,
         filters: &QueryFilters,
-    ) -> (String, Vec<duckdb::types::Value>) {
-        let mut query = base_query.to_string();
-        let mut params = Vec::new();
-
-        if let Some(username) = &filters.username {
-            // Only add if not already in base query (simple check)
-            if !base_query.contains("user = ?") {
-                query.push_str(" AND user = ?");
-                params.push(duckdb::types::Value::Text(username.clone()));
+        include_username: bool,
+    ) -> QueryBuilder {
+        if include_username {
+            if let Some(username) = &filters.username {
+                builder = builder.filter_user(username);
             }
         }
 
         if let Some(uid) = filters.uid {
-            query.push_str(" AND uid = ?");
-            params.push(duckdb::types::Value::BigInt(uid));
+            builder = builder.filter_uid(uid);
         }
 
         if let Some(open) = filters.open {
-            query.push_str(" AND open = ?");
-            params.push(duckdb::types::Value::Boolean(open));
+            builder = builder.filter_open(open);
         }
 
-        // Limit and Offset
         if let Some(limit) = filters.limit {
-            query.push_str(" LIMIT ?");
-            params.push(duckdb::types::Value::BigInt(limit as i64));
+            builder = builder.limit(limit);
         }
 
         if let Some(offset) = filters.offset {
-            query.push_str(" OFFSET ?");
-            params.push(duckdb::types::Value::BigInt(offset as i64));
+            builder = builder.offset(offset);
         }
 
-        (query, params)
+        builder
     }
 
     /// Execute a query that returns a list of changesets
-    fn execute_query(
+    fn execute_query_sql(
         &self,
         query: &str,
-        params: Vec<duckdb::types::Value>,
     ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(query)?;
-
-        // Convert Vec<Value> to slice of references which duckdb expects
-        let params_refs: Vec<&dyn duckdb::ToSql> =
-            params.iter().map(|v| v as &dyn duckdb::ToSql).collect();
-
-        let mut rows = stmt.query(params_refs.as_slice())?;
+        let mut rows = stmt.query([])?;
         let mut changesets = Vec::new();
 
         while let Some(row) = rows.next()? {

@@ -6,9 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Dataset-wide metadata
 ///
-/// # TODO
-/// - Add caching strategy
-/// - Implement loading from partition files
+/// Intended to be populated from cached partition/index data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metadata {
     pub last_updated: String,
@@ -21,9 +19,7 @@ pub struct Metadata {
 
 /// Information about a single partition
 ///
-/// # TODO
-/// - Calculate partition statistics
-/// - Cache partition metadata
+/// Intended to be populated from partition stats and cached.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PartitionMetadata {
     pub year: u32,
@@ -38,8 +34,7 @@ pub struct PartitionMetadata {
 
 /// Temporal coverage information
 ///
-/// # TODO
-/// - Implement coverage calculation
+/// Intended to be computed from partition stats.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemporalCoverage {
     pub start_timestamp: i64,
@@ -50,9 +45,7 @@ pub struct TemporalCoverage {
 
 /// User statistics from changesets
 ///
-/// # TODO
-/// - Build user index from changesets
-/// - Cache frequently accessed user stats
+/// Intended to be populated from user index data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserStatistics {
     pub uid: i64,

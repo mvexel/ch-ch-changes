@@ -26,11 +26,7 @@ use std::collections::HashMap;
 /// - `description` - Changeset description/comment
 /// - `tags` - Additional key-value pairs (e.g., "comment", "review_requested")
 ///
-/// # TODO
-/// - Implement conversion from Parquet row format
-/// - Implement timestamp conversion utilities
-/// - Add validation for coordinate ranges
-/// - Add helper methods for common queries
+/// Future: add validation helpers and timestamp formatting utilities.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Changeset {
     pub id: i64,
@@ -52,10 +48,6 @@ pub struct Changeset {
 
 impl Changeset {
     /// Create a new changeset with minimal required fields
-    ///
-    /// # TODO
-    /// - Validate IDs and coordinates
-    /// - Set default values for optional fields
     pub fn new(id: i64) -> Self {
         Self {
             id,

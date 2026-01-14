@@ -10,9 +10,7 @@ use crate::models::Changeset;
 
 /// Trait for formatting changesets into various output formats
 ///
-/// # TODO
-/// - Implement format trait
-/// - Add streaming formatter support
+/// Future: add streaming formatter support.
 pub trait Formatter {
     /// Format a single changeset
     fn format_changeset(&self, changeset: &Changeset)
@@ -35,9 +33,6 @@ pub enum FormatType {
 
 impl FormatType {
     /// Parse format from string
-    ///
-    /// # TODO
-    /// - Add case-insensitive matching
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "xml" => Some(FormatType::Xml),

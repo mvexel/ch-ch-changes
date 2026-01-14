@@ -2,137 +2,190 @@
 //!
 //! Constructs SQL queries for DuckDB Parquet queries with proper partition selection.
 
+use std::fmt::Write;
+
 /// Query builder for constructing SQL queries
 ///
 /// # Features
 /// - Partition selection based on date/ID ranges
 /// - WHERE clause building
-/// - Parameter binding
 /// - Query optimization hints
-///
-/// # TODO
-/// - Implement partition pruning logic
-/// - Build WHERE clauses dynamically
-/// - Add query parameter escaping/validation
 pub struct QueryBuilder {
-    // TODO: Add builder state fields
+    parquet_paths: Vec<String>,
+    where_clauses: Vec<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
 }
 
 impl QueryBuilder {
     /// Create a new query builder
-    ///
-    /// # TODO
-    /// - Initialize empty builder
     pub fn new() -> Self {
-        // TODO: Implement
-        Self {}
+        Self {
+            parquet_paths: Vec::new(),
+            where_clauses: Vec::new(),
+            limit: None,
+            offset: None,
+        }
     }
 
     /// Select from specific Parquet file
-    ///
-    /// # TODO
-    /// - Add file path to query
     pub fn from_parquet(mut self, path: &str) -> Self {
-        // TODO: Implement
+        self.parquet_paths = vec![path.to_string()];
         self
     }
 
     /// Select from multiple Parquet files (partitions)
-    ///
-    /// # TODO
-    /// - Add multiple files to query
     pub fn from_parquets(mut self, paths: Vec<&str>) -> Self {
-        // TODO: Implement
+        self.parquet_paths = paths.into_iter().map(|path| path.to_string()).collect();
         self
     }
 
     /// Add a WHERE clause
-    ///
-    /// # TODO
-    /// - Build WHERE condition
-    /// - Escape parameters
     pub fn where_clause(mut self, condition: &str) -> Self {
-        // TODO: Implement
+        if !condition.trim().is_empty() {
+            self.where_clauses.push(condition.trim().to_string());
+        }
         self
     }
 
     /// Filter by changeset ID range
-    ///
-    /// # TODO
-    /// - Add ID range filter
     pub fn filter_id_range(mut self, start_id: i64, end_id: i64) -> Self {
-        // TODO: Implement
+        self.where_clauses
+            .push(format!("id >= {} AND id <= {}", start_id, end_id));
         self
     }
 
     /// Filter by date range
-    ///
-    /// # TODO
-    /// - Parse date strings
-    /// - Add timestamp filter
     pub fn filter_date_range(mut self, start_date: &str, end_date: &str) -> Self {
-        // TODO: Implement
+        let start = escape_sql_literal(start_date);
+        let end = escape_sql_literal(end_date);
+        self.where_clauses.push(format!(
+            "created_at >= CAST('{}' AS TIMESTAMP) AND created_at <= CAST('{}' AS TIMESTAMP)",
+            start, end
+        ));
         self
     }
 
     /// Filter by username
-    ///
-    /// # TODO
-    /// - Escape username
-    /// - Add user filter
     pub fn filter_user(mut self, username: &str) -> Self {
-        // TODO: Implement
+        let username = escape_sql_literal(username);
+        self.where_clauses
+            .push(format!("user = '{}'", username));
         self
     }
 
     /// Filter by user ID
-    ///
-    /// # TODO
-    /// - Add UID filter
     pub fn filter_uid(mut self, uid: i64) -> Self {
-        // TODO: Implement
+        self.where_clauses.push(format!("uid = {}", uid));
         self
     }
 
     /// Filter by open/closed status
-    ///
-    /// # TODO
-    /// - Add open status filter
     pub fn filter_open(mut self, open: bool) -> Self {
-        // TODO: Implement
+        self.where_clauses.push(format!("open = {}", open));
         self
     }
 
     /// Add LIMIT clause
-    ///
-    /// # TODO
-    /// - Add limit to query
     pub fn limit(mut self, limit: u32) -> Self {
-        // TODO: Implement
+        self.limit = Some(limit);
         self
     }
 
     /// Add OFFSET clause
-    ///
-    /// # TODO
-    /// - Add offset to query
     pub fn offset(mut self, offset: u32) -> Self {
-        // TODO: Implement
+        self.offset = Some(offset);
         self
     }
 
     /// Build the final SQL query string
-    ///
-    /// # TODO
-    /// - Assemble all clauses
-    /// - Return complete SQL
     pub fn build(self) -> String {
-        // TODO: Implement
-        String::new()
+        if self.parquet_paths.is_empty() {
+            return String::new();
+        }
+
+        let source = build_parquet_source(&self.parquet_paths);
+        let mut query = format!("SELECT * FROM {source}");
+
+        if !self.where_clauses.is_empty() {
+            query.push_str(" WHERE ");
+            query.push_str(&self.where_clauses.join(" AND "));
+        }
+
+        if let Some(limit) = self.limit {
+            write!(&mut query, " LIMIT {}", limit).ok();
+        }
+
+        if let Some(offset) = self.offset {
+            write!(&mut query, " OFFSET {}", offset).ok();
+        }
+
+        query
     }
+}
+
+fn build_parquet_source(paths: &[String]) -> String {
+    if paths.len() == 1 {
+        let path = escape_sql_literal(&paths[0]);
+        return format!("read_parquet('{}', hive_partitioning=true)", path);
+    }
+
+    let mut list = String::new();
+    for (idx, path) in paths.iter().enumerate() {
+        if idx > 0 {
+            list.push(',');
+        }
+        let escaped = escape_sql_literal(path);
+        write!(&mut list, "'{}'", escaped).ok();
+    }
+
+    format!("read_parquet([{}], hive_partitioning=true)", list)
+}
+
+fn escape_sql_literal(value: &str) -> String {
+    value.replace('\'', "''")
 }
 
 #[cfg(test)]
 mod tests {
-    // TODO: Add tests for query builder
+    use super::*;
+
+    #[test]
+    fn test_build_single_path() {
+        let query = QueryBuilder::new()
+            .from_parquet("/data/year=2024/month=05.parquet")
+            .filter_user("alice")
+            .limit(10)
+            .build();
+        assert_eq!(
+            query,
+            "SELECT * FROM read_parquet('/data/year=2024/month=05.parquet', hive_partitioning=true) WHERE user = 'alice' LIMIT 10"
+        );
+    }
+
+    #[test]
+    fn test_build_multiple_paths_and_filters() {
+        let query = QueryBuilder::new()
+            .from_parquets(vec!["/data/p1.parquet", "/data/p2.parquet"])
+            .filter_id_range(1, 10)
+            .filter_open(true)
+            .offset(5)
+            .build();
+        assert_eq!(
+            query,
+            "SELECT * FROM read_parquet(['/data/p1.parquet','/data/p2.parquet'], hive_partitioning=true) WHERE id >= 1 AND id <= 10 AND open = true OFFSET 5"
+        );
+    }
+
+    #[test]
+    fn test_escape_literals() {
+        let query = QueryBuilder::new()
+            .from_parquet("/data/o'reilly.parquet")
+            .filter_user("o'reilly")
+            .build();
+        assert_eq!(
+            query,
+            "SELECT * FROM read_parquet('/data/o''reilly.parquet', hive_partitioning=true) WHERE user = 'o''reilly'"
+        );
+    }
 }

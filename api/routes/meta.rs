@@ -62,12 +62,6 @@ pub struct PartitionInfo {
 /// Health check endpoint
 ///
 /// Returns basic health information about the API service.
-///
-/// # TODO
-/// - Track server uptime
-/// - Check if data is loaded
-/// - Count available partitions
-/// - Return version number
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let parquet_files = list_parquet_files(state.engine.data_path());
     let partition_count = parquet_files.len() as u32;
@@ -85,12 +79,7 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 /// Get tip/boundary information
 ///
 /// Returns metadata about the latest changeset data available.
-///
-/// # TODO
-/// - Read metadata from cache or latest partition
-/// - Return latest changeset ID
-/// - Return last update timestamp
-/// - Return total changeset count
+/// update_frequency is currently hardcoded.
 pub async fn get_tip(State(state): State<AppState>) -> Json<TipResponse> {
     let parquet_files = list_parquet_files(state.engine.data_path());
     let last_updated = latest_modified_rfc3339(&parquet_files).unwrap_or_default();
@@ -113,12 +102,6 @@ pub async fn get_tip(State(state): State<AppState>) -> Json<TipResponse> {
 /// Get dataset coverage information
 ///
 /// Returns detailed information about available partitions and temporal coverage.
-///
-/// # TODO
-/// - Load partition metadata
-/// - Calculate file sizes
-/// - Determine temporal boundaries
-/// - Return partition statistics
 pub async fn get_coverage(State(state): State<AppState>) -> Json<CoverageResponse> {
     let parquet_files = list_parquet_files(state.engine.data_path());
     let partition_counts = state.engine.get_partition_counts().unwrap_or_default();
