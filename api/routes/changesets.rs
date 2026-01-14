@@ -124,12 +124,26 @@ pub async fn get_changesets_by_day(
     }
 }
 
-async fn handle_id_range(
-    state: AppState,
-    start_id: i64,
-    end_id: i64,
-    params: QueryParams,
+pub async fn get_changesets_by_id_range(
+    State(state): State<AppState>,
+    Path((start_str, end_raw)): Path<(String, String)>,
+    Query(mut params): Query<QueryParams>,
 ) -> Response {
+    let (end_str, ext_format) = extract_extension(&end_raw);
+    if params.format.is_none() {
+        params.format = ext_format;
+    }
+
+    let start_id = match start_str.parse::<i64>() {
+        Ok(id) => id,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let end_id = match end_str.parse::<i64>() {
+        Ok(id) => id,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
     match state
         .engine
         .get_changesets_by_id_range(start_id, end_id, &params.to_filters())
@@ -142,16 +156,21 @@ async fn handle_id_range(
     }
 }
 
-async fn handle_date_range(
-    state: AppState,
-    start_str: String,
-    end_str: String,
-    params: QueryParams,
+pub async fn get_changesets_by_date_range(
+    State(state): State<AppState>,
+    Path((start_str, end_raw)): Path<(String, String)>,
+    Query(mut params): Query<QueryParams>,
 ) -> Response {
+    let (end_str, ext_format) = extract_extension(&end_raw);
+    if params.format.is_none() {
+        params.format = ext_format;
+    }
+
     let start_date = match NaiveDate::parse_from_str(&start_str, "%Y%m%d") {
         Ok(d) => Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0).unwrap()),
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
+
     let end_date = match NaiveDate::parse_from_str(&end_str, "%Y%m%d") {
         Ok(d) => Utc.from_utc_datetime(&d.and_hms_opt(23, 59, 59).unwrap()),
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
@@ -168,29 +187,6 @@ async fn handle_date_range(
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
-}
-
-pub async fn get_changesets_range(
-    State(state): State<AppState>,
-    Path((start, end_raw)): Path<(String, String)>,
-    Query(mut params): Query<QueryParams>,
-) -> Response {
-    let (end, ext_format) = extract_extension(&end_raw);
-    if params.format.is_none() {
-        params.format = ext_format;
-    }
-
-    if NaiveDate::parse_from_str(&start, "%Y%m%d").is_ok()
-        && NaiveDate::parse_from_str(end, "%Y%m%d").is_ok()
-    {
-        return handle_date_range(state, start, end.to_string(), params).await;
-    }
-
-    if let (Ok(start_id), Ok(end_id)) = (start.parse::<i64>(), end.parse::<i64>()) {
-        return handle_id_range(state, start_id, end_id, params).await;
-    }
-
-    StatusCode::BAD_REQUEST.into_response()
 }
 
 pub async fn get_changesets_by_hour(
@@ -499,9 +495,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_changesets_range_id() {
+    async fn test_get_changesets_by_id_range() {
         let (_dir, state) = setup_state();
-        let response = get_changesets_range(
+        let response = get_changesets_by_id_range(
             State(state),
             Path(("1".to_string(), "2".to_string())),
             Query(QueryParams {
@@ -525,9 +521,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_changesets_range_date() {
+    async fn test_get_changesets_by_date_range() {
         let (_dir, state) = setup_state();
-        let response = get_changesets_range(
+        let response = get_changesets_by_date_range(
             State(state),
             Path(("20240501".to_string(), "20240502".to_string())),
             Query(QueryParams {

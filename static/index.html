@@ -52,23 +52,68 @@
     <p><span class="endpoint">GET /health</span> - Health check</p>
     <pre><code>curl https://DOMAIN/health</code></pre>
 
-    <p><span class="endpoint">GET /changeset/{id}.json</span> - Single changeset</p>
-    <pre><code>curl https://DOMAIN/changeset/1.json</code></pre>
+    <p><span class="endpoint">GET /changeset/{id}</span> - Single changeset</p>
+    <pre><code># XML format (default)
+curl https://DOMAIN/changeset/1
 
-    <p><span class="endpoint">GET /changesets/day/{YYYY-MM-DD}</span> - All changesets on a date</p>
-    <pre><code>curl https://DOMAIN/changesets/day/20240115</code></pre>
+# JSON format (using extension)
+curl https://DOMAIN/changeset/1.json
 
-    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}/[minute/{MM}]</span> - All changesets on a date and time.</p>
-    <pre><code>curl https://DOMAIN/changesets/day/20240115/hour/23/minute/59</code></pre>
+# JSON format (using query param)
+curl https://DOMAIN/changeset/1?format=json</code></pre>
 
-    <p><span class="endpoint">GET /changesets/from/{start}/to/{end}</span> - Date range (only handles entire days) <strong>response can be huge!</strong></p>
-    <pre><code>curl https://DOMAIN/changesets/from/20240101/to/20240131</code></pre>
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}</span> - All changesets on a date</p>
+    <pre><code># XML format (default)
+curl https://DOMAIN/changesets/day/20240115
+
+# JSON format
+curl https://DOMAIN/changesets/day/20240115.json
+
+# JSONL format (one changeset per line, useful for large results)
+curl https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
+
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}</span> - All changesets in a specific hour</p>
+    <pre><code>curl https://DOMAIN/changesets/day/20240115/hour/23.json</code></pre>
+
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}/minute/{MM}</span> - All changesets in a specific minute</p>
+    <pre><code>curl https://DOMAIN/changesets/day/20240115/hour/23/minute/59.json</code></pre>
+
+    <p><span class="endpoint">GET /changesets/date/from/{start}/to/{end}</span> - Date range (entire days) <strong>response can be huge!</strong></p>
+    <pre><code>curl https://DOMAIN/changesets/date/from/20240101/to/20240131.json</code></pre>
+
+    <p><span class="endpoint">GET /changesets/id/from/{start}/to/{end}</span> - Changeset ID range <strong>response can be huge!</strong></p>
+    <pre><code>curl https://DOMAIN/changesets/id/from/1/to/100.json</code></pre>
 
     <p><span class="endpoint">GET /meta/tip</span> - Latest changeset ID</p>
     <pre><code>curl https://DOMAIN/meta/tip</code></pre>
 
     <p><span class="endpoint">GET /meta/coverage</span> - Available date range</p>
     <pre><code>curl https://DOMAIN/meta/coverage</code></pre>
+
+    <h3>Format Options</h3>
+
+    <p>All endpoints support multiple output formats:</p>
+    <ul>
+        <li><code>xml</code> - OSM XML format (default)</li>
+        <li><code>json</code> - JSON format</li>
+        <li><code>jsonl</code> - JSON Lines format (one changeset per line, for batch endpoints only)</li>
+    </ul>
+
+    <p>Specify format using file extension (e.g., <code>.json</code>) or query parameter (e.g., <code>?format=json</code>)</p>
+
+    <h3>Query Parameters</h3>
+
+    <p>Batch endpoints (day/hour/minute/range) support filtering and pagination:</p>
+    <ul>
+        <li><code>user</code> - Filter by username (e.g., <code>?user=alice</code>)</li>
+        <li><code>uid</code> - Filter by user ID (e.g., <code>?uid=123</code>)</li>
+        <li><code>open</code> - Filter by open/closed status (e.g., <code>?open=true</code>)</li>
+        <li><code>limit</code> - Limit number of results (e.g., <code>?limit=100</code>)</li>
+        <li><code>offset</code> - Offset for pagination (e.g., <code>?offset=100</code>)</li>
+    </ul>
+
+    <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
+curl "https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
 
     <h2>Direct DuckDB Access</h2>
 

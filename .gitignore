@@ -4,3 +4,6 @@ _local/
 # Local configuration files (copy from .example files)
 Caddyfile
 hetzner-config.env
+
+.DS_Store
+*.osm
