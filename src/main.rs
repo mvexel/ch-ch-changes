@@ -169,7 +169,7 @@ impl BatchBuilders {
             }
             self.tags.append(true).unwrap();
         } else {
-            self.tags.append(false).unwrap();
+            self.tags.append(true).unwrap();
         }
 
         self.len += 1;
