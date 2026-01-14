@@ -2,8 +2,9 @@
 
 Process changesets on a beefy EC2 instance, then terminate it. Only pay for what you use.
 
-**THIS IS NOT COMPLETE**
+## Overview
 
+Process changesets on AWS EC2 and upload to S3 for efficient DuckDB querying with glob patterns. Also copies the parquet files back to local FS for API access.
 
 ## Prerequisites
 
@@ -127,7 +128,7 @@ aws ec2 authorize-security-group-ingress \
   --cidr $VPS_IP/32
 
 echo "Security Group ID: $SG_ID"
-# Save this - you'll need it in step 7
+# Save this if you want to pin the ID; otherwise the script can auto-discover by name
 ```
 ### 6. Get Subnet ID
 
@@ -140,10 +141,111 @@ aws ec2 describe-subnets \
   --filters "Name=default-for-az,Values=true" \
   --query 'Subnets[0].SubnetId' \
   --output text
-# Save this - you'll need it in step 7
+# Save this if you want to pin the subnet; otherwise the script can auto-discover
 ```
 
-### 7. Configure the Script
+### 7. Create S3 Bucket and IAM Role
+
+Create a public S3 bucket for hosting the parquet files:
+
+```bash
+# Create bucket
+aws s3 mb s3://osm-changesets-parquet --region us-east-1
+
+# Enable public read access (for public data)
+aws s3api put-public-access-block \
+    --bucket osm-changesets-parquet \
+    --public-access-block-configuration \
+    "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+
+# Set bucket policy
+cat > /tmp/bucket-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublicReadGetObject",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": ["s3:GetObject", "s3:ListBucket"],
+      "Resource": [
+        "arn:aws:s3:::osm-changesets-parquet",
+        "arn:aws:s3:::osm-changesets-parquet/*"
+      ]
+    }
+  ]
+}
+EOF
+
+aws s3api put-bucket-policy \
+    --bucket osm-changesets-parquet \
+    --policy file:///tmp/bucket-policy.json
+```
+
+Create IAM role for EC2 to upload to S3:
+
+```bash
+# Create trust policy
+cat > /tmp/trust-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {"Service": "ec2.amazonaws.com"},
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+# Create role
+aws iam create-role \
+    --role-name changeset-processor-role \
+    --assume-role-policy-document file:///tmp/trust-policy.json
+
+# Create S3 access policy
+cat > /tmp/s3-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::osm-changesets-parquet",
+        "arn:aws:s3:::osm-changesets-parquet/*"
+      ]
+    }
+  ]
+}
+EOF
+
+# Attach policy
+aws iam put-role-policy \
+    --role-name changeset-processor-role \
+    --policy-name S3Access \
+    --policy-document file:///tmp/s3-policy.json
+
+# Create instance profile
+aws iam create-instance-profile \
+    --instance-profile-name changeset-processor-profile
+
+# Add role to profile
+aws iam add-role-to-instance-profile \
+    --instance-profile-name changeset-processor-profile \
+    --role-name changeset-processor-role
+
+echo "Instance profile: changeset-processor-profile"
+# Save this - you'll need it in step 8
+```
+
+### 8. Configure the Script
 
 ```bash
 # Copy example config
@@ -153,12 +255,20 @@ cp aws-config.env.example /opt/changeset-app/aws-config.env
 nano /opt/changeset-app/aws-config.env
 ```
 
-Set these values (from previous steps):
+Set these values (from previous steps). If you used the default names,
+you can leave `SECURITY_GROUP` and `SUBNET_ID` empty and the script will
+auto-discover them.
 ```bash
-SECURITY_GROUP=sg-xxxxx      # From step 5
-SUBNET_ID=subnet-xxxxx       # From step 6
-KEY_NAME=changeset-processor # From step 4
-SSH_KEY_PATH=~/.ssh/aws-processor.pem
+# Core settings
+SECURITY_GROUP=sg-xxxxx                          # From step 5 (optional)
+SECURITY_GROUP_NAME=changeset-processor-sg        # Default group name
+SUBNET_ID=subnet-xxxxx                           # From step 6 (optional)
+KEY_NAME=changeset-processor                     # From step 4 (default name)
+SSH_KEY_PATH=~/.ssh/aws-processor.pem           # From step 4
+
+# S3 Upload (required for DuckDB glob queries)
+S3_BUCKET=s3://osm-changesets-parquet           # From step 7
+IAM_INSTANCE_PROFILE=changeset-processor-profile # From step 7
 ```
 
 ## Usage
@@ -193,13 +303,14 @@ Keep instance alive for 30 minutes on failure so you can SSH in and debug:
 ```
 
 **What happens:**
-1. Launches on-demand EC2 instance
-2. Instance boots and auto-installs Docker
+1. Launches on-demand EC2 instance with IAM role
+2. Instance boots and auto-installs Docker and AWS CLI
 3. Copies your source code to the instance
 4. Builds Docker image on the instance
 5. Runs changeset processing
-6. Syncs data back to VPS via rsync
-7. Terminates instance automatically
+6. Uploads data to S3 (public bucket for DuckDB queries)
+7. Syncs data back to VPS via rsync
+8. Terminates instance automatically
 
 **Guaranteed cleanup** - Instance automatically terminates even if the script crashes or is interrupted (Ctrl+C).
 

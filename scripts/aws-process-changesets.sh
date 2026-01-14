@@ -47,19 +47,77 @@ if [ -f "$CONFIG_FILE" ]; then
 fi
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
-INSTANCE_TYPE="${INSTANCE_TYPE:-c6i.4xlarge}"
+INSTANCE_TYPE="${INSTANCE_TYPE:-c6i.2xlarge}"
 AMI_ID="${AMI_ID:-ami-0c55b159cbfafe1f0}"
 SECURITY_GROUP="${SECURITY_GROUP}"
+SECURITY_GROUP_NAME="${SECURITY_GROUP_NAME:-changeset-processor-sg}"
 SUBNET_ID="${SUBNET_ID}"
-KEY_NAME="${KEY_NAME}"
-SSH_KEY_PATH="${SSH_KEY_PATH:-~/.ssh/aws-changeset-processor.pem}"
+KEY_NAME="${KEY_NAME:-changeset-processor}"
+IAM_INSTANCE_PROFILE="${IAM_INSTANCE_PROFILE}"  # Required for S3 upload
+SSH_KEY_PATH="${SSH_KEY_PATH:-~/.ssh/aws-processor.pem}"
+S3_BUCKET="${S3_BUCKET}"  # Required for DuckDB glob queries, e.g., s3://osm-changesets-parquet
 DEST_DATA_DIR="${DEST_DATA_DIR:-/opt/changeset-data/changesets}"
 LOG_FILE="${LOG_FILE:-/var/log/changeset-aws-$(date +%Y%m%d-%H%M%S).log}"
 REPO_DIR="${REPO_DIR:-/opt/changeset-app}"
 
+# Create log directory
+mkdir -p "$(dirname "$LOG_FILE")"
+
+# Logging function
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+# Normalize SSH key path
+if [[ "$SSH_KEY_PATH" == "~/"* ]]; then
+    SSH_KEY_PATH="${HOME}/${SSH_KEY_PATH#~/}"
+fi
+
+# Auto-discovery helpers
+normalize_aws_value() {
+    if [ -z "$1" ] || [ "$1" = "None" ]; then
+        echo ""
+    else
+        echo "$1"
+    fi
+}
+
+# Auto-discover security group by name
+if [ -z "$SECURITY_GROUP" ] && [ -n "$SECURITY_GROUP_NAME" ]; then
+    sg_id=$(aws ec2 describe-security-groups \
+        --region "$AWS_REGION" \
+        --filters "Name=group-name,Values=$SECURITY_GROUP_NAME" \
+        --query 'SecurityGroups[0].GroupId' \
+        --output text 2>/dev/null || true)
+    sg_id=$(normalize_aws_value "$sg_id")
+    if [ -n "$sg_id" ]; then
+        SECURITY_GROUP="$sg_id"
+        log "Auto-discovered security group: $SECURITY_GROUP (name: $SECURITY_GROUP_NAME)"
+    fi
+fi
+
+# Auto-discover subnet in default VPC
+if [ -z "$SUBNET_ID" ]; then
+    subnet_id=$(aws ec2 describe-subnets \
+        --region "$AWS_REGION" \
+        --filters "Name=default-for-az,Values=true" "Name=state,Values=available" \
+        --query 'Subnets[0].SubnetId' \
+        --output text 2>/dev/null || true)
+    subnet_id=$(normalize_aws_value "$subnet_id")
+    if [ -n "$subnet_id" ]; then
+        SUBNET_ID="$subnet_id"
+        log "Auto-discovered subnet: $SUBNET_ID (default VPC)"
+    fi
+fi
+
 # Validate configuration
 if [ -z "$SECURITY_GROUP" ] || [ -z "$SUBNET_ID" ] || [ -z "$KEY_NAME" ]; then
-    echo "Error: Missing configuration. See AWS_EPHEMERAL_PROCESSING.md"
+    echo "Error: Missing configuration. See docs/AWS.md"
+    exit 1
+fi
+
+if [ ! -f "$SSH_KEY_PATH" ]; then
+    echo "Error: SSH key not found at $SSH_KEY_PATH"
     exit 1
 fi
 
@@ -69,14 +127,6 @@ if [ ! -d "$REPO_DIR" ]; then
     echo "Set REPO_DIR in $CONFIG_FILE or run from the repository directory"
     exit 1
 fi
-
-# Create log directory
-mkdir -p "$(dirname "$LOG_FILE")"
-
-# Logging function
-log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
-}
 
 # Cleanup function - ensures instance is terminated even on unexpected error
 cleanup() {
@@ -114,19 +164,27 @@ echo "[$(date)] Starting user-data script..."
 echo "[$(date)] Updating packages..."
 apt-get update
 
-echo "[$(date)] Installing Docker..."
-apt-get install -y docker.io
+echo "[$(date)] Installing Docker and AWS CLI..."
+apt-get install -y docker.io awscli
 
 echo "[$(date)] Creating directories..."
 mkdir -p /data/changesets /app
 chown ubuntu:ubuntu /app /data
 
-echo "[$(date)] Docker installation complete, ready for builds"
+echo "[$(date)] Docker and AWS CLI installation complete, ready for builds"
 EOF
 )
 
 # Launch instance
 log "[1/7] Launching instance..."
+
+# Build instance launch command
+IAM_PROFILE_ARG=""
+if [ -n "$IAM_INSTANCE_PROFILE" ]; then
+    IAM_PROFILE_ARG="--iam-instance-profile Name=$IAM_INSTANCE_PROFILE"
+    log "Using IAM instance profile: $IAM_INSTANCE_PROFILE"
+fi
+
 INSTANCE_ID=$(aws ec2 run-instances \
     --region "$AWS_REGION" \
     --image-id "$AMI_ID" \
@@ -134,6 +192,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --key-name "$KEY_NAME" \
     --security-group-ids "$SECURITY_GROUP" \
     --subnet-id "$SUBNET_ID" \
+    $IAM_PROFILE_ARG \
     --user-data "$USER_DATA" \
     --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":100,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=changeset-processor-ephemeral},{Key=LaunchedBy,Value=aws-process-changesets}]" \
@@ -325,8 +384,24 @@ if [ "$PROCESSING_FAILED" = true ]; then
     exit 1
 fi
 
-# Sync data
-log "[7/7] Syncing data back to VPS..."
+# Upload to S3
+if [ -n "$S3_BUCKET" ]; then
+    log "[7/8] Uploading data to S3: $S3_BUCKET..."
+    if ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ubuntu@$PUBLIC_IP \
+        "aws s3 sync /data/changesets/ $S3_BUCKET/ --delete --storage-class INTELLIGENT_TIERING" >> "$LOG_FILE" 2>&1; then
+        log "S3 upload successful!"
+        log "Data available at: $S3_BUCKET"
+    else
+        log "ERROR: S3 upload failed!"
+        PROCESSING_FAILED=true
+    fi
+else
+    log "WARNING: S3_BUCKET not configured - data will only be synced to VPS"
+    log "For DuckDB glob queries, configure S3_BUCKET in aws-config.env"
+fi
+
+# Sync data to VPS
+log "[8/8] Syncing data back to VPS..."
 mkdir -p "$DEST_DATA_DIR"
 if rsync -avz --progress \
     -e "ssh -i $SSH_KEY_PATH -o StrictHostKeyChecking=no" \
@@ -346,8 +421,16 @@ rm -f /tmp/changeset-processor-instance-id
 log ""
 log "=== Complete ==="
 log "Data at: $DEST_DATA_DIR"
+if [ -n "$S3_BUCKET" ]; then
+    log "S3 location: $S3_BUCKET"
+fi
 log "Duration: $((DURATION / 60)) minutes"
 log "Estimated cost: ~\$$(echo "scale=2; 0.68 * $DURATION / 3600" | bc 2>/dev/null || echo 'N/A')"
 log "Log file: $LOG_FILE"
 log ""
 log "Run 'docker compose restart api' to serve the new data."
+if [ -n "$S3_BUCKET" ]; then
+    log ""
+    log "Query with DuckDB:"
+    log "  SELECT COUNT(*) FROM read_parquet('$S3_BUCKET/year=*/month=*.parquet', hive_partitioning=1);"
+fi
