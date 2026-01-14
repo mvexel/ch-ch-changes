@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OSM Changeset API</title>
+    <title>OSM Bulk Changeset API</title>
     <style>
         body {
             max-width: 800px;
@@ -34,13 +34,24 @@
     </style>
 </head>
 <body>
-    <h1>OSM Changeset API</h1>
+    <h1>OSM Bulk Changeset API</h1>
 
-    <p>Query OpenStreetMap changeset data via REST API or direct DuckDB access to parquet files.</p>
+    <p>Query OpenStreetMap changeset metadata in bulk.</p>
 
     <p>This service is useful if you want to retrieve metadata for a non-trivial subset of OSM changeset metadata.
         OSM lets you retrieve up to 100 at the time using the OSM API (<a href="https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets">docs</a>).
-        This service lets you query by minute, hour, day and even day ranges.
+        This service lets you query by minute, hour, day and even day ranges. Additionally, you can filter by user ID, bounding box, and tags.
+    </p>
+
+    <h3>About Changesets</h3>
+
+    <p>Each time an OpenStreetMap contributor uploads their edits, a changeset gets created.
+        A changeset has two components: <strong>metadata</strong> and <strong>map changes</strong>. The <strong>metadata</strong> part, which is what this service provides,
+        tells you useful things about the changeset: when it was opened, closed, by whom, which editor was used,
+        and some more useful information about the context of the changes made to the map. The <strong>map changes</strong>
+        is the information about the actual edits the contributor made to OSM.
+        This can be any combination of adding new features, changing existing ones, or deleting features.
+        There are some links below if you want to learn more.
     </p>
 
     <h3>Data Updates</h3>
@@ -115,42 +126,7 @@ curl https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
     <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
 curl "https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
 
-    <h2>Direct DuckDB Access</h2>
-
-    <p>Query parquet files directly. The parquet data is partitioned by year and month.</p>
-
-    <p><a href="/data/">Browse parquet files →</a></p>
-
-    <pre><code># Example: Count changesets in 2024
-duckdb -c "
-  SELECT COUNT(*)
-  FROM read_parquet('https://DOMAIN/data/changesets_2024_*.parquet')
-"</code></pre>
-
-    <pre><code># Example: Top contributors
-duckdb -c "
-  SELECT user, COUNT(*) as changesets
-  FROM read_parquet('https://DOMAIN/data/changesets_2024_*.parquet')
-  GROUP BY user
-  ORDER BY changesets DESC
-  LIMIT 10
-"</code></pre>
-
-    <h2>Python Example</h2>
-
-    <pre><code>import duckdb
-
-# Query remote parquet
-result = duckdb.sql("""
-    SELECT
-        DATE_TRUNC('day', created_at) as day,
-        COUNT(*) as changesets
-    FROM read_parquet('https://DOMAIN/data/changesets_2024_*.parquet')
-    GROUP BY day
-    ORDER BY day
-""").df()
-
-print(result)</code></pre>
+    <p>Remember that <em>OSM usernames are case-sensitive, so <code>alice</code> is probably not the same mapper as <code>Alice</code></em>.</p>
 
     <h2>Data Schema</h2>
 
@@ -170,8 +146,14 @@ print(result)</code></pre>
 
     <h2>Rate Limits</h2>
 
-    <p>None currently.
+    <p>None currently. This service offered as-is with no uptime / availability guarantees.</p>
 
+    <h2>See also</h2>
+    <ul>
+        <li>OpenStreetMap offers a bzipped XML download of all OSM changeset metadata on its <a href="https://planet.osm.org">data download page</a>. This archive file is created once a week. This is the data we use to power this service.</li>
+        <li><a href="https://wiki.openstreetmap.org/wiki/Changeset">Changeset</a> page on the OpenStreetMap wiki.</li>
+        <li><a href="https://osmcha.org">OSMCha</a> is the best way to inspect the actual edits made for each changeset.</li>
+    </ul>
 
     <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;">
 
