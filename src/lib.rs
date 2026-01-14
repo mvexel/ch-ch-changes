@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 /// Represents a changeset in the OSM data
 #[derive(Debug, Default, Clone)]
 pub struct Changeset {
@@ -14,4 +16,5 @@ pub struct Changeset {
     pub num_changes: u32,
     pub comments_count: u32,
     pub description: Option<String>,
+    pub tags: HashMap<String, String>,
 }

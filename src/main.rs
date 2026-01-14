@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use arrow::array::{
-    ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, StringBuilder,
+    ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, MapBuilder, StringBuilder,
     TimestampMillisecondBuilder, UInt32Builder,
 };
-use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow::datatypes::{DataType, Field, Fields, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use bzip2::read::MultiBzDecoder;
 use changesets_to_parquet::Changeset;
@@ -66,6 +66,7 @@ struct BatchBuilders {
     num_changes: UInt32Builder,
     comments_count: UInt32Builder,
     description: StringBuilder,
+    tags: MapBuilder<StringBuilder, StringBuilder>,
     len: usize,
 }
 
@@ -88,6 +89,12 @@ impl BatchBuilders {
             num_changes: UInt32Builder::with_capacity(capacity),
             comments_count: UInt32Builder::with_capacity(capacity),
             description: StringBuilder::with_capacity(capacity, string_byte_capacity),
+            tags: MapBuilder::with_capacity(
+                None,
+                StringBuilder::with_capacity(capacity * 2, string_byte_capacity),
+                StringBuilder::with_capacity(capacity * 2, string_byte_capacity),
+                capacity,
+            ),
             len: 0,
         }
     }
@@ -154,6 +161,17 @@ impl BatchBuilders {
             self.description.append_null();
         }
 
+        // Append tags
+        if !cs.tags.is_empty() {
+            for (k, v) in &cs.tags {
+                self.tags.keys().append_value(k);
+                self.tags.values().append_value(v);
+            }
+            self.tags.append(true).unwrap();
+        } else {
+            self.tags.append(false).unwrap();
+        }
+
         self.len += 1;
     }
 
@@ -180,6 +198,7 @@ impl BatchBuilders {
             Arc::new(self.num_changes.finish()),
             Arc::new(self.comments_count.finish()),
             Arc::new(self.description.finish()),
+            Arc::new(self.tags.finish()),
         ];
 
         let batch = RecordBatch::try_new(schema.clone(), columns)?;
@@ -417,6 +436,7 @@ impl IndexCollector {
                 num_changes: cs.num_changes,
                 comments_count: cs.comments_count,
                 description: cs.description.clone(),
+                tags: cs.tags.clone(),
             });
         }
 
@@ -617,8 +637,9 @@ fn apply_changeset_tag(e: &BytesStart, changeset: &mut Changeset) -> Result<()> 
 
     if let (Some(k), Some(v)) = (key, value) {
         if k == "comment" {
-            changeset.description = Some(v);
+            changeset.description = Some(v.clone());
         }
+        changeset.tags.insert(k, v);
     }
 
     Ok(())
@@ -874,6 +895,21 @@ fn create_schema() -> Arc<Schema> {
         Field::new("num_changes", DataType::UInt32, false),
         Field::new("comments_count", DataType::UInt32, false),
         Field::new("description", DataType::Utf8, true),
+        Field::new(
+            "tags",
+            DataType::Map(
+                Arc::new(Field::new(
+                    "entries",
+                    DataType::Struct(Fields::from(vec![
+                        Field::new("key", DataType::Utf8, false),
+                        Field::new("value", DataType::Utf8, true),
+                    ])),
+                    false,
+                )),
+                false,
+            ),
+            false,
+        ),
     ]))
 }
 
