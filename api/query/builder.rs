@@ -15,6 +15,7 @@ pub struct QueryBuilder {
     where_clauses: Vec<String>,
     limit: Option<u32>,
     offset: Option<u32>,
+    deduplicate: bool,
 }
 
 impl QueryBuilder {
@@ -25,6 +26,7 @@ impl QueryBuilder {
             where_clauses: Vec::new(),
             limit: None,
             offset: None,
+            deduplicate: false,
         }
     }
 
@@ -98,6 +100,12 @@ impl QueryBuilder {
         self
     }
 
+    /// Enable deduplication (latest wins strategy)
+    pub fn deduplicate(mut self) -> Self {
+        self.deduplicate = true;
+        self
+    }
+
     /// Build the final SQL query string
     pub fn build(self) -> String {
         if self.parquet_paths.is_empty() {
@@ -105,11 +113,17 @@ impl QueryBuilder {
         }
 
         let source = build_parquet_source(&self.parquet_paths);
-        let mut query = format!("SELECT * FROM {source}");
+        // Use REPLACE to convert Map tags to JSON string for easier parsing
+        let mut query = format!("SELECT * REPLACE (to_json(tags) AS tags) FROM {source}");
 
         if !self.where_clauses.is_empty() {
             query.push_str(" WHERE ");
             query.push_str(&self.where_clauses.join(" AND "));
+        }
+
+        if self.deduplicate {
+            // Latest wins strategy: prefer closed changesets, then latest created
+            query.push_str(" QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY closed_at DESC NULLS LAST, created_at DESC) = 1");
         }
 
         if let Some(limit) = self.limit {
@@ -159,7 +173,7 @@ mod tests {
             .build();
         assert_eq!(
             query,
-            "SELECT * FROM read_parquet('/data/year=2024/month=05.parquet', hive_partitioning=true) WHERE user = 'alice' LIMIT 10"
+            "SELECT * REPLACE (to_json(tags) AS tags) FROM read_parquet('/data/year=2024/month=05.parquet', hive_partitioning=true) WHERE user = 'alice' LIMIT 10"
         );
     }
 
@@ -173,7 +187,7 @@ mod tests {
             .build();
         assert_eq!(
             query,
-            "SELECT * FROM read_parquet(['/data/p1.parquet','/data/p2.parquet'], hive_partitioning=true) WHERE id >= 1 AND id <= 10 AND open = true OFFSET 5"
+            "SELECT * REPLACE (to_json(tags) AS tags) FROM read_parquet(['/data/p1.parquet','/data/p2.parquet'], hive_partitioning=true) WHERE id >= 1 AND id <= 10 AND open = true OFFSET 5"
         );
     }
 
@@ -185,7 +199,7 @@ mod tests {
             .build();
         assert_eq!(
             query,
-            "SELECT * FROM read_parquet('/data/o''reilly.parquet', hive_partitioning=true) WHERE user = 'o''reilly'"
+            "SELECT * REPLACE (to_json(tags) AS tags) FROM read_parquet('/data/o''reilly.parquet', hive_partitioning=true) WHERE user = 'o''reilly'"
         );
     }
 }

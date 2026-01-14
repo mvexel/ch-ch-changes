@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// - Partition filtering and pruning
 pub struct PartitionResolver {
     root: PathBuf,
-    partitions_by_key: HashMap<(u32, u32), PartitionInfo>,
+    partitions_by_key: HashMap<(u32, u32), Vec<PartitionInfo>>,
     partitions_by_path: HashMap<String, PartitionInfo>,
     has_id_index: bool,
 }
@@ -25,17 +25,20 @@ impl PartitionResolver {
     /// Create a new partition resolver
     ///
     /// # Arguments
-    /// - `index_path` - Path to partitioned Parquet files
+    /// - `index_path` - Path to directory containing partitioned Parquet files
     pub fn new(index_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let root = PathBuf::from(index_path);
-        let mut partitions_by_key = HashMap::new();
+        let mut partitions_by_key: HashMap<(u32, u32), Vec<PartitionInfo>> = HashMap::new();
         let mut partitions_by_path = HashMap::new();
         let mut has_id_index = false;
 
         if let Some(partitions) = load_partition_stats_index(&root) {
             for info in partitions {
                 has_id_index = true;
-                partitions_by_key.insert((info.year, info.month), info.clone());
+                partitions_by_key
+                    .entry((info.year, info.month))
+                    .or_default()
+                    .push(info.clone());
                 partitions_by_path.insert(info.path.clone(), info);
             }
         } else {
@@ -59,7 +62,10 @@ impl PartitionResolver {
                     file_size_bytes,
                 };
 
-                partitions_by_key.insert((year, month), info.clone());
+                partitions_by_key
+                    .entry((year, month))
+                    .or_default()
+                    .push(info.clone());
                 partitions_by_path.insert(info.path.clone(), info);
             }
         }
@@ -91,8 +97,8 @@ impl PartitionResolver {
         let mut month = start_month;
 
         loop {
-            if let Some(info) = self.partitions_by_key.get(&(year, month)) {
-                paths.push(info.path.clone());
+            if let Some(infos) = self.partitions_by_key.get(&(year, month)) {
+                paths.extend(infos.iter().map(|info| info.path.clone()));
             }
 
             if (year, month) == (end_year, end_month) {
@@ -126,7 +132,7 @@ impl PartitionResolver {
             return self.get_all_partitions();
         }
 
-        let mut entries: Vec<_> = self.partitions_by_key.values().collect();
+        let mut entries: Vec<_> = self.partitions_by_key.values().flatten().collect();
         entries.sort_by_key(|info| (info.year, info.month));
         let mut paths = Vec::new();
 
@@ -142,36 +148,43 @@ impl PartitionResolver {
     /// Get all available partitions
     ///
     pub fn get_all_partitions(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let mut entries: Vec<_> = self.partitions_by_key.values().collect();
+        let mut entries: Vec<_> = self.partitions_by_key.values().flatten().collect();
         entries.sort_by_key(|info| (info.year, info.month));
         Ok(entries.iter().map(|info| info.path.clone()).collect())
     }
 
-    /// Get partition for a specific date
+    /// Get partitions for a specific date
     ///
-    pub fn get_partition_for_date(&self, date: &str) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn get_partition_for_date(&self, date: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let (year, month) = parse_date_year_month(date)?;
         self.partitions_by_key
             .get(&(year, month))
-            .map(|info| info.path.clone())
+            .map(|infos| infos.iter().map(|i| i.path.clone()).collect())
             .ok_or_else(|| "partition not found".into())
     }
 
-    /// Get partition containing a specific changeset ID
+    /// Get partitions containing a specific changeset ID
     ///
-    /// Requires an ID range index to resolve a single partition.
-    pub fn get_partition_for_id(&self, id: i64) -> Result<String, Box<dyn std::error::Error>> {
+    /// Requires an ID range index to resolve partitions.
+    pub fn get_partition_for_id(&self, id: i64) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         if !self.has_id_index {
             return Err(format!("no ID range index available for id={id}").into());
         }
 
-        for info in self.partitions_by_key.values() {
-            if info.min_id <= id && info.max_id >= id {
-                return Ok(info.path.clone());
+        let mut paths = Vec::new();
+        for infos in self.partitions_by_key.values() {
+            for info in infos {
+                if info.min_id <= id && info.max_id >= id {
+                    paths.push(info.path.clone());
+                }
             }
         }
 
-        Err("partition not found".into())
+        if paths.is_empty() {
+            Err("partition not found".into())
+        } else {
+            Ok(paths)
+        }
     }
 
     /// Get metadata about a partition
@@ -380,17 +393,19 @@ mod tests {
     fn test_get_partition_for_date() {
         let dir = setup_partitions();
         let resolver = PartitionResolver::new(dir.path().to_str().unwrap()).expect("resolver");
-        let partition = resolver.get_partition_for_date("2024-05-15").expect("partition");
-        assert!(partition.contains("month=05.parquet"));
+        let partitions = resolver.get_partition_for_date("2024-05-15").expect("partition");
+        assert!(!partitions.is_empty());
+        assert!(partitions[0].contains("month=05.parquet"));
     }
 
     #[test]
     fn test_get_partition_metadata() {
         let dir = setup_partitions();
         let resolver = PartitionResolver::new(dir.path().to_str().unwrap()).expect("resolver");
-        let partition = resolver.get_partition_for_date("20240601").expect("partition");
+        let partitions = resolver.get_partition_for_date("20240601").expect("partition");
+        assert!(!partitions.is_empty());
         let info = resolver
-            .get_partition_metadata(&partition)
+            .get_partition_metadata(&partitions[0])
             .expect("metadata");
         assert_eq!(info.year, 2024);
         assert_eq!(info.month, 6);
@@ -448,7 +463,8 @@ mod tests {
         assert_eq!(partitions.len(), 1);
         assert!(partitions[0].contains("month=05"));
 
-        let partition = resolver.get_partition_for_id(150).expect("partition");
-        assert!(partition.contains("month=06"));
+        let partitions = resolver.get_partition_for_id(150).expect("partition");
+        assert!(!partitions.is_empty());
+        assert!(partitions[0].contains("month=06"));
     }
 }

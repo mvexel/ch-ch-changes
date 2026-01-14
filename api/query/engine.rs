@@ -1,5 +1,5 @@
 //! DuckDB query execution engine
-//!
+//! 
 //! Manages DuckDB connections and executes queries against Parquet files.
 
 use crate::models::Changeset;
@@ -9,6 +9,7 @@ use duckdb::{
     types::{TimeUnit, Value},
     Connection,
 };
+use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -47,12 +48,27 @@ impl QueryEngine {
         })
     }
 
-    /// Helper to get the glob pattern for all parquet files
-    fn get_glob_pattern(&self) -> String {
-        self.data_path
-            .join("year=*/**/*.parquet")
-            .to_string_lossy()
-            .to_string()
+    /// Helper to get the glob patterns for all parquet files
+    /// Returns patterns for both base and delta directories if they exist,
+    /// or falls back to a recursive search.
+    fn get_glob_patterns(&self) -> Vec<String> {
+        let base = self.data_path.join("base");
+        let delta = self.data_path.join("delta");
+        
+        let mut globs = Vec::new();
+        if base.exists() {
+            globs.push(base.join("**/*.parquet").to_string_lossy().to_string());
+        }
+        if delta.exists() {
+             globs.push(delta.join("**/*.parquet").to_string_lossy().to_string());
+        }
+        
+        if globs.is_empty() {
+             // Fallback for tests or flat structure (year=YYYY at root)
+             globs.push(self.data_path.join("year=*/**/*.parquet").to_string_lossy().to_string());
+        }
+        
+        globs
     }
 
     pub fn data_path(&self) -> &std::path::Path {
@@ -61,30 +77,28 @@ impl QueryEngine {
 
     /// Query a single changeset by ID
     pub fn get_changeset(&self, id: i64) -> Result<Option<Changeset>, Box<dyn std::error::Error>> {
-        if let Ok(partition) = self.partition_resolver.get_partition_for_id(id) {
+        // First try partition resolver (which should be updated to handle delta/base)
+        if let Ok(partitions) = self.partition_resolver.get_partition_for_id(id) {
             let query = QueryBuilder::new()
-                .from_parquet(&partition)
+                .from_parquets(partitions.iter().map(|s| s.as_str()).collect())
                 .filter_id_range(id, id)
+                .deduplicate()
                 .build();
             let mut results = self.execute_query_sql(&query)?;
+            // Because of deduplication, we should get 1 row max per ID
             return Ok(results.pop());
         }
 
-        let conn = self.conn.lock().unwrap();
-        let glob = self.get_glob_pattern();
-
-        let mut stmt = conn.prepare(&format!(
-            "SELECT * FROM read_parquet('{}', hive_partitioning=true) WHERE id = ?",
-            glob
-        ))?;
-
-        let mut rows = stmt.query(params![id])?;
-
-        if let Some(row) = rows.next()? {
-            Ok(Some(serde_duckdb::from_row(&row)?))
-        } else {
-            Ok(None)
-        }
+        // Fallback to scanning all files (slow but robust)
+        let globs = self.get_glob_patterns();
+        let query = QueryBuilder::new()
+            .from_parquets(globs.iter().map(|s| s.as_str()).collect())
+            .filter_id_range(id, id)
+            .deduplicate()
+            .build();
+        
+        let mut results = self.execute_query_sql(&query)?;
+        Ok(results.pop())
     }
 
     /// Query changesets by date range
@@ -112,7 +126,8 @@ impl QueryEngine {
 
         let mut builder = QueryBuilder::new()
             .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
-            .filter_date_range(&start_str, &end_str);
+            .filter_date_range(&start_str, &end_str)
+            .deduplicate();
         builder = self.apply_filters_to_builder(builder, filters, true);
         let query = builder.build();
         self.execute_query_sql(&query)
@@ -138,7 +153,8 @@ impl QueryEngine {
 
         let mut builder = QueryBuilder::new()
             .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
-            .filter_id_range(start_id, end_id);
+            .filter_id_range(start_id, end_id)
+            .deduplicate();
         builder = self.apply_filters_to_builder(builder, filters, true);
         let query = builder.build();
         self.execute_query_sql(&query)
@@ -151,8 +167,9 @@ impl QueryEngine {
         filters: &QueryFilters,
     ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
         let mut builder = QueryBuilder::new()
-            .from_parquet(&self.get_glob_pattern())
-            .filter_user(username);
+            .from_parquets(self.get_glob_patterns().iter().map(|s| s.as_str()).collect())
+            .filter_user(username)
+            .deduplicate();
         builder = self.apply_filters_to_builder(builder, filters, false);
         let query = builder.build();
         self.execute_query_sql(&query)
@@ -161,11 +178,17 @@ impl QueryEngine {
     /// Get the latest changeset ID available
     pub fn get_latest_id(&self) -> Result<i64, Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap();
-        let glob = self.get_glob_pattern();
+        let globs = self.get_glob_patterns();
+        let source = if globs.len() == 1 {
+            format!("'{}'", globs[0].replace('"', "''"))
+        } else {
+            let list = globs.iter().map(|p| format!("'{}'", p.replace('"', "''"))).collect::<Vec<_>>().join(",");
+            format!("[{}]", list)
+        };
 
         let mut stmt = conn.prepare(&format!(
-            "SELECT MAX(id) FROM read_parquet('{}', hive_partitioning=true)",
-            glob
+            "SELECT MAX(id) FROM read_parquet({}, hive_partitioning=true)",
+            source
         ))?;
 
         let mut rows = stmt.query([])?;
@@ -181,11 +204,18 @@ impl QueryEngine {
     /// Get total changeset count
     pub fn get_total_count(&self) -> Result<u64, Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap();
-        let glob = self.get_glob_pattern();
+        let globs = self.get_glob_patterns();
+        let source = if globs.len() == 1 {
+            format!("'{}'", globs[0].replace('"', "''"))
+        } else {
+            let list = globs.iter().map(|p| format!("'{}'", p.replace('"', "''"))).collect::<Vec<_>>().join(",");
+            format!("[{}]", list)
+        };
 
+        // Use COUNT(DISTINCT id) because of potential overlaps between base and delta
         let mut stmt = conn.prepare(&format!(
-            "SELECT COUNT(*) FROM read_parquet('{}', hive_partitioning=true)",
-            glob
+            "SELECT COUNT(DISTINCT id) FROM read_parquet({}, hive_partitioning=true)",
+            source
         ))?;
 
         let mut rows = stmt.query([])?;
@@ -200,11 +230,17 @@ impl QueryEngine {
 
     pub fn get_earliest_id(&self) -> Result<i64, Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap();
-        let glob = self.get_glob_pattern();
+        let globs = self.get_glob_patterns();
+        let source = if globs.len() == 1 {
+            format!("'{}'", globs[0].replace('"', "''"))
+        } else {
+            let list = globs.iter().map(|p| format!("'{}'", p.replace('"', "''"))).collect::<Vec<_>>().join(",");
+            format!("[{}]", list)
+        };
 
         let mut stmt = conn.prepare(&format!(
-            "SELECT MIN(id) FROM read_parquet('{}', hive_partitioning=true)",
-            glob
+            "SELECT MIN(id) FROM read_parquet({}, hive_partitioning=true)",
+            source
         ))?;
 
         let mut rows = stmt.query([])?;
@@ -220,12 +256,18 @@ impl QueryEngine {
         &self,
     ) -> Result<(Option<i64>, Option<i64>), Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap();
-        let glob = self.get_glob_pattern();
+        let globs = self.get_glob_patterns();
+        let source = if globs.len() == 1 {
+            format!("'{}'", globs[0].replace('"', "''"))
+        } else {
+            let list = globs.iter().map(|p| format!("'{}'", p.replace('"', "''"))).collect::<Vec<_>>().join(",");
+            format!("[{}]", list)
+        };
 
         let mut stmt = conn.prepare(&format!(
-            "SELECT MIN(created_at) AS min_created_at, MAX(created_at) AS max_created_at \
-             FROM read_parquet('{}', hive_partitioning=true)",
-            glob
+            "SELECT MIN(created_at) AS min_created_at, MAX(created_at) AS max_created_at 
+             FROM read_parquet({}, hive_partitioning=true)",
+            source
         ))?;
 
         let mut rows = stmt.query([])?;
@@ -253,7 +295,7 @@ impl QueryEngine {
                 None => continue,
             };
 
-            let file_sql = file.to_string_lossy().replace('\'', "''");
+            let file_sql = file.to_string_lossy().replace('"', "''");
             let query = format!("SELECT COUNT(*) FROM read_parquet('{}')", file_sql);
             let count: i64 = conn.query_row(&query, [], |row| row.get(0))?;
 
@@ -461,25 +503,13 @@ mod serde_duckdb {
         let comments_count: u32 = row.get::<_, i32>("comments_count")? as u32;
         let description: Option<String> = row.get("description").ok();
 
-        // Tags handling: DuckDB Map -> HashMap
-        // FIXME: Implement tag parsing from DuckDB Value.
-        // Current duckdb crate version's OrderedMap is opaque (private field) and doesn't implement IntoIterator.
-        // We might need to cast to JSON in SQL or wait for upstream fix.
-        let tags: HashMap<String, String> = HashMap::new();
-        /*
-        let tags_val: Value = row.get("tags").unwrap_or(Value::Null);
-        let tags: HashMap<String, String> = match tags_val {
-            Value::Map(entries) => {
-                entries.0.into_iter().filter_map(|(k, v)| {
-                    match (k, v) {
-                        (Value::Text(k), Value::Text(v)) => Some((k, v)),
-                        _ => None
-                    }
-                }).collect()
-            },
-            _ => HashMap::new(),
+        // Tags handling: Tag field is now converted to JSON string by QueryBuilder
+        let tags_json: Option<String> = row.get("tags").ok();
+        let tags: HashMap<String, String> = if let Some(json_str) = tags_json {
+             serde_json::from_str(&json_str).unwrap_or_default()
+        } else {
+            HashMap::new()
         };
-        */
 
         Ok(Changeset {
             id,
@@ -516,6 +546,7 @@ mod tests {
         let parquet_path = year_dir.join("month=05.parquet");
         let conn = Connection::open_in_memory().expect("duckdb");
 
+        // Schema must include tags as MAP
         conn.execute_batch(
             "CREATE TABLE changesets (
                 id BIGINT,
@@ -530,19 +561,20 @@ mod tests {
                 max_lon DOUBLE,
                 num_changes INTEGER,
                 comments_count INTEGER,
-                description VARCHAR
+                description VARCHAR,
+                tags MAP(VARCHAR, VARCHAR)
             );",
         )
         .expect("create table");
 
         conn.execute_batch(
             "INSERT INTO changesets VALUES
-                (1, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first'),
-                (2, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second');",
+                (1, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first', MAP {'source': 'aerial'}),
+                (2, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second', MAP {'comment': 'oops'});",
         )
         .expect("insert rows");
 
-        let parquet_path_sql = parquet_path.to_string_lossy().replace('\'', "''");
+        let parquet_path_sql = parquet_path.to_string_lossy().replace('"', "''");
         let copy_sql = format!(
             "COPY changesets TO '{}' (FORMAT PARQUET);",
             parquet_path_sql
@@ -560,6 +592,7 @@ mod tests {
         let changeset = engine.get_changeset(1).expect("query").expect("row");
         assert_eq!(changeset.id, 1);
         assert_eq!(changeset.user.as_deref(), Some("alice"));
+        assert_eq!(changeset.tags.get("source").map(|s| s.as_str()), Some("aerial"));
 
         let expected_created = Utc
             .with_ymd_and_hms(2024, 5, 1, 0, 0, 0)

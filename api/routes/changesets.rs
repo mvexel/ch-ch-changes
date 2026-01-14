@@ -322,15 +322,16 @@ mod tests {
                 max_lon DOUBLE,
                 num_changes INTEGER,
                 comments_count INTEGER,
-                description VARCHAR
+                description VARCHAR,
+                tags MAP(VARCHAR, VARCHAR)
             );",
         )
         .expect("create table");
 
         conn.execute_batch(
             "INSERT INTO changesets VALUES
-                (1, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first'),
-                (2, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second');",
+                (1, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first', MAP {'comment': 'first'}),
+                (2, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second', MAP {'comment': 'second'});",
         )
         .expect("insert rows");
 
