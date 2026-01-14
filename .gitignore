@@ -3,4 +3,4 @@ _local/
 
 # Local configuration files (copy from .example files)
 Caddyfile
-aws-config.env
+hetzner-config.env

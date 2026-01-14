@@ -81,20 +81,24 @@ This will both download and process the latest changeset dump.
 
 ======================================
 
-### Option B: Process on AWS
+### Option B: Process on Hetzner Cloud
 
-Use ephemeral AWS EC2 instances for processing heavy workloads, then sync to VPS.
+Use ephemeral Hetzner Cloud servers for processing heavy workloads, then sync to VPS.
 
-....setup stuff ......
+See [HETZNER.md](HETZNER.md) for full setup instructions.
 
 ```bash
 cd /opt/changeset-app
-./scripts/aws-process-changesets.sh
+./scripts/hetzner-process-changesets.sh
 ```
 
-....why would you do this....
+This is much cheaper and simpler than running on your VPS 24/7.
 
-systemd service to schedule
+## Scheduled Processing
+
+### Option 1: Systemd Timer (Local Processing)
+
+Use this if you want to process on your VPS:
 
 ```bash
 # Create service file
@@ -142,15 +146,16 @@ systemctl start changeset-builder.timer
 systemctl list-timers | grep changeset
 ```
 
-or: 
-Use cron to schedule AWS processing (cheaper for large datasets):
+### Option 2: Cron (Hetzner Cloud Processing)
+
+Use cron to schedule Hetzner Cloud processing (cheaper for large datasets):
 
 ```bash
 # Edit crontab
 crontab -e
 
 # Add weekly processing on Sundays at 3 AM
-0 3 * * 0 /opt/changeset-app/scripts/aws-process-changesets.sh >> /var/log/changeset-aws.log 2>&1
+0 3 * * 0 /opt/changeset-app/scripts/hetzner-process-changesets.sh >> /var/log/changeset-hetzner.log 2>&1
 ```
 
 # Verify
