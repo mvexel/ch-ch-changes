@@ -2,18 +2,14 @@
 //!
 //! Handles requests for individual changesets by ID.
 
+use crate::format::{json::JsonFormatter, xml::XmlFormatter, Formatter};
+use crate::state::AppState;
 use axum::{
-    extract::{Path, State, Query},
-    http::{StatusCode, header},
+    extract::{Path, Query, State},
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
-use crate::state::AppState;
-use crate::format::{
-    xml::XmlFormatter,
-    json::JsonFormatter,
-    Formatter,
-};
 
 #[derive(Deserialize)]
 pub struct FormatQuery {
@@ -36,16 +32,17 @@ pub async fn get_changeset(
         .or(params.format.as_deref())
         .unwrap_or("xml");
     match format {
-        "json" => get_changeset_json(State(state), Path(id)).await.into_response(),
-        _ => get_changeset_xml(State(state), Path(id)).await.into_response(),
+        "json" => get_changeset_json(State(state), Path(id))
+            .await
+            .into_response(),
+        _ => get_changeset_xml(State(state), Path(id))
+            .await
+            .into_response(),
     }
 }
 
 /// Get a single changeset in XML format
-pub async fn get_changeset_xml(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> Response {
+pub async fn get_changeset_xml(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
     match state.engine.get_changeset(id) {
         Ok(Some(changeset)) => {
             let formatter = XmlFormatter::new();
@@ -66,10 +63,7 @@ pub async fn get_changeset_xml(
 }
 
 /// Get a single changeset in JSON format
-pub async fn get_changeset_json(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> Response {
+pub async fn get_changeset_json(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
     match state.engine.get_changeset(id) {
         Ok(Some(changeset)) => {
             let formatter = JsonFormatter::new(false);
@@ -100,7 +94,9 @@ fn parse_id_and_format(raw: &str) -> Result<(i64, Option<String>), StatusCode> {
         _ => (raw, None),
     };
 
-    let id = id_part.parse::<i64>().map_err(|_| StatusCode::BAD_REQUEST)?;
+    let id = id_part
+        .parse::<i64>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
     Ok((id, format))
 }
 
@@ -183,7 +179,9 @@ mod tests {
             .and_then(|value| value.to_str().ok());
         assert_eq!(content_type, Some("application/json"));
 
-        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
         let value: Value = serde_json::from_slice(&body).expect("json");
         assert_eq!(value["changeset"]["id"], 1);
         assert_eq!(value["changeset"]["tags"]["comment"], "first");
@@ -206,7 +204,9 @@ mod tests {
             .and_then(|value| value.to_str().ok());
         assert_eq!(content_type, Some("application/xml"));
 
-        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
         let body_str = String::from_utf8(body.to_vec()).expect("utf8");
         assert!(body_str.contains("<changeset id=\"1\""));
     }

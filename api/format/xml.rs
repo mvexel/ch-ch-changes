@@ -2,9 +2,9 @@
 //!
 //! Formats changesets in OSM XML format, compatible with the official OSM replication format.
 
-use crate::models::Changeset;
 use crate::format::Formatter;
-use chrono::{TimeZone, Utc, SecondsFormat};
+use crate::models::Changeset;
+use chrono::{SecondsFormat, TimeZone, Utc};
 use std::borrow::Cow;
 
 const OSM_ROOT_OPEN: &str = "<osm version=\"0.6\" generator=\"changeset-historic-api/0.1.0\" copyright=\"OpenStreetMap and contributors\" attribution=\"http://www.openstreetmap.org/copyright\" license=\"http://opendatacommons.org/licenses/odbl/1-0/\">\n";
@@ -41,22 +41,26 @@ impl XmlFormatter {
     /// Format a single changeset as XML element string
     fn format_changeset_element(&self, changeset: &Changeset) -> String {
         let mut xml = String::with_capacity(512);
-        
+
         // Start changeset tag
         xml.push_str(&format!("\t<changeset id=\"{}\"", changeset.id));
-        
+
         // Add timestamps
         if let Some(created_at) = changeset.created_at {
             if let Some(dt) = Utc.timestamp_millis_opt(created_at).single() {
-                xml.push_str(&format!(" created_at=\"{}\"", 
-                    dt.to_rfc3339_opts(SecondsFormat::Secs, true)));
+                xml.push_str(&format!(
+                    " created_at=\"{}\"",
+                    dt.to_rfc3339_opts(SecondsFormat::Secs, true)
+                ));
             }
         }
-        
+
         if let Some(closed_at) = changeset.closed_at {
             if let Some(dt) = Utc.timestamp_millis_opt(closed_at).single() {
-                xml.push_str(&format!(" closed_at=\"{}\"", 
-                    dt.to_rfc3339_opts(SecondsFormat::Secs, true)));
+                xml.push_str(&format!(
+                    " closed_at=\"{}\"",
+                    dt.to_rfc3339_opts(SecondsFormat::Secs, true)
+                ));
             }
         }
 
@@ -65,7 +69,7 @@ impl XmlFormatter {
         if let Some(user) = &changeset.user {
             xml.push_str(&format!(" user=\"{}\"", Self::escape_xml(user)));
         }
-        
+
         if let Some(uid) = changeset.uid {
             xml.push_str(&format!(" uid=\"{}\"", uid));
         }
@@ -102,9 +106,11 @@ impl XmlFormatter {
     fn format_tags(&self, tags: &[(String, String)]) -> String {
         let mut tags_xml = String::new();
         for (k, v) in tags {
-            tags_xml.push_str(&format!("\t\t<tag k=\"{}\" v=\"{}\"/>\n", 
-                Self::escape_xml(k), 
-                Self::escape_xml(v)));
+            tags_xml.push_str(&format!(
+                "\t\t<tag k=\"{}\" v=\"{}\"/>\n",
+                Self::escape_xml(k),
+                Self::escape_xml(v)
+            ));
         }
         tags_xml
     }
@@ -128,7 +134,10 @@ impl XmlFormatter {
 }
 
 impl Formatter for XmlFormatter {
-    fn format_changeset(&self, changeset: &Changeset) -> Result<String, Box<dyn std::error::Error>> {
+    fn format_changeset(
+        &self,
+        changeset: &Changeset,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         xml.push_str(OSM_ROOT_OPEN);
         xml.push_str(&self.format_changeset_element(changeset));
@@ -136,7 +145,10 @@ impl Formatter for XmlFormatter {
         Ok(xml)
     }
 
-    fn format_changesets(&self, changesets: &[Changeset]) -> Result<String, Box<dyn std::error::Error>> {
+    fn format_changesets(
+        &self,
+        changesets: &[Changeset],
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         xml.push_str(OSM_ROOT_OPEN);
         for changeset in changesets {
@@ -153,7 +165,11 @@ mod tests {
     use crate::models::Changeset;
     use std::collections::HashMap;
 
-    fn build_changeset(id: i64, description: Option<&str>, tags: HashMap<String, String>) -> Changeset {
+    fn build_changeset(
+        id: i64,
+        description: Option<&str>,
+        tags: HashMap<String, String>,
+    ) -> Changeset {
         Changeset {
             id,
             created_at: None,

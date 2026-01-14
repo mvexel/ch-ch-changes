@@ -2,9 +2,9 @@
 //!
 //! Implements formatters for different response formats (XML, JSON, JSONL).
 
-pub mod xml;
 pub mod json;
 pub mod jsonl;
+pub mod xml;
 
 use crate::models::Changeset;
 
@@ -15,10 +15,14 @@ use crate::models::Changeset;
 /// - Add streaming formatter support
 pub trait Formatter {
     /// Format a single changeset
-    fn format_changeset(&self, changeset: &Changeset) -> Result<String, Box<dyn std::error::Error>>;
+    fn format_changeset(&self, changeset: &Changeset)
+        -> Result<String, Box<dyn std::error::Error>>;
 
     /// Format multiple changesets
-    fn format_changesets(&self, changesets: &[Changeset]) -> Result<String, Box<dyn std::error::Error>>;
+    fn format_changesets(
+        &self,
+        changesets: &[Changeset],
+    ) -> Result<String, Box<dyn std::error::Error>>;
 }
 
 /// Format type enumeration

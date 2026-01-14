@@ -3,11 +3,11 @@
 //! Formats changesets in JSONL format - one JSON object per line.
 //! Best for streaming and bulk processing of large datasets.
 
-use crate::models::Changeset;
 use crate::format::Formatter;
+use crate::models::Changeset;
+use chrono::{SecondsFormat, TimeZone, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
-use chrono::{TimeZone, Utc, SecondsFormat};
 
 /// JSONL formatter for changeset output
 pub struct JsonLinesFormatter;
@@ -49,16 +49,21 @@ impl JsonLinesFormatter {
     fn to_jsonl_changeset(&self, changeset: &Changeset) -> JsonLinesChangeset {
         let mut tags = changeset.tags.clone();
         if let Some(description) = &changeset.description {
-            tags.entry("comment".to_string()).or_insert_with(|| description.clone());
+            tags.entry("comment".to_string())
+                .or_insert_with(|| description.clone());
         }
 
         JsonLinesChangeset {
             id: changeset.id,
             created_at: changeset.created_at.and_then(|ts| {
-                Utc.timestamp_millis_opt(ts).single().map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
+                Utc.timestamp_millis_opt(ts)
+                    .single()
+                    .map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
             }),
             closed_at: changeset.closed_at.and_then(|ts| {
-                Utc.timestamp_millis_opt(ts).single().map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
+                Utc.timestamp_millis_opt(ts)
+                    .single()
+                    .map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
             }),
             open: changeset.open,
             user: changeset.user.clone(),
@@ -75,12 +80,18 @@ impl JsonLinesFormatter {
 }
 
 impl Formatter for JsonLinesFormatter {
-    fn format_changeset(&self, changeset: &Changeset) -> Result<String, Box<dyn std::error::Error>> {
+    fn format_changeset(
+        &self,
+        changeset: &Changeset,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let jsonl_changeset = self.to_jsonl_changeset(changeset);
         Ok(serde_json::to_string(&jsonl_changeset)?)
     }
 
-    fn format_changesets(&self, changesets: &[Changeset]) -> Result<String, Box<dyn std::error::Error>> {
+    fn format_changesets(
+        &self,
+        changesets: &[Changeset],
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let lines: Vec<String> = changesets
             .iter()
             .map(|cs| {
@@ -100,7 +111,11 @@ mod tests {
     use serde_json::Value;
     use std::collections::HashMap;
 
-    fn build_changeset(id: i64, description: Option<&str>, tags: HashMap<String, String>) -> Changeset {
+    fn build_changeset(
+        id: i64,
+        description: Option<&str>,
+        tags: HashMap<String, String>,
+    ) -> Changeset {
         Changeset {
             id,
             created_at: None,

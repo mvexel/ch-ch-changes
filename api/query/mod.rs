@@ -2,11 +2,11 @@
 //!
 //! Contains the DuckDB query engine and SQL query building utilities.
 
-pub mod engine;
 pub mod builder;
+pub mod engine;
 pub mod partition;
 
+pub use builder::QueryBuilder;
 pub use engine::QueryEngine;
 pub use engine::QueryFilters;
-pub use builder::QueryBuilder;
 pub use partition::PartitionResolver;

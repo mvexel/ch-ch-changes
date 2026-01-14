@@ -4,9 +4,9 @@
 
 use crate::models::Changeset;
 use duckdb::{
-    Connection,
     params,
     types::{TimeUnit, Value},
+    Connection,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,10 +32,10 @@ impl QueryEngine {
     /// - `data_path` - Path to directory containing partitioned Parquet files
     pub fn new(data_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let conn = Connection::open_in_memory()?;
-        
+
         // Initialize parquet extension if needed (usually built-in)
         // conn.execute("INSTALL parquet; LOAD parquet;", [])?;
-        
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             data_path: PathBuf::from(data_path),
@@ -44,7 +44,10 @@ impl QueryEngine {
 
     /// Helper to get the glob pattern for all parquet files
     fn get_glob_pattern(&self) -> String {
-        self.data_path.join("year=*/**/*.parquet").to_string_lossy().to_string()
+        self.data_path
+            .join("year=*/**/*.parquet")
+            .to_string_lossy()
+            .to_string()
     }
 
     pub fn data_path(&self) -> &std::path::Path {
@@ -55,14 +58,14 @@ impl QueryEngine {
     pub fn get_changeset(&self, id: i64) -> Result<Option<Changeset>, Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap();
         let glob = self.get_glob_pattern();
-        
+
         let mut stmt = conn.prepare(&format!(
             "SELECT * FROM read_parquet('{}', hive_partitioning=true) WHERE id = ?",
             glob
         ))?;
-        
+
         let mut rows = stmt.query(params![id])?;
-        
+
         if let Some(row) = rows.next()? {
             Ok(Some(serde_duckdb::from_row(&row)?))
         } else {
@@ -84,7 +87,7 @@ impl QueryEngine {
 
         let base_query = "SELECT * FROM read_parquet(?, hive_partitioning=true) WHERE created_at >= CAST(? AS TIMESTAMP) AND created_at <= CAST(? AS TIMESTAMP)";
         let (query, params) = self.apply_filters(base_query, filters);
-        
+
         // Prepend the required params
         let mut final_params = Vec::new();
         final_params.push(duckdb::types::Value::Text(self.get_glob_pattern()));
@@ -102,7 +105,8 @@ impl QueryEngine {
         end_id: i64,
         filters: &QueryFilters,
     ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
-        let base_query = "SELECT * FROM read_parquet(?, hive_partitioning=true) WHERE id >= ? AND id <= ?";
+        let base_query =
+            "SELECT * FROM read_parquet(?, hive_partitioning=true) WHERE id >= ? AND id <= ?";
         let (query, params) = self.apply_filters(base_query, filters);
 
         let mut final_params = Vec::new();
@@ -135,14 +139,14 @@ impl QueryEngine {
     pub fn get_latest_id(&self) -> Result<i64, Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap();
         let glob = self.get_glob_pattern();
-        
+
         let mut stmt = conn.prepare(&format!(
             "SELECT MAX(id) FROM read_parquet('{}', hive_partitioning=true)",
             glob
         ))?;
-        
+
         let mut rows = stmt.query([])?;
-        
+
         if let Some(row) = rows.next()? {
             let id: Option<i64> = row.get(0)?;
             Ok(id.unwrap_or(0))
@@ -155,14 +159,14 @@ impl QueryEngine {
     pub fn get_total_count(&self) -> Result<u64, Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap();
         let glob = self.get_glob_pattern();
-        
+
         let mut stmt = conn.prepare(&format!(
             "SELECT COUNT(*) FROM read_parquet('{}', hive_partitioning=true)",
             glob
         ))?;
-        
+
         let mut rows = stmt.query([])?;
-        
+
         if let Some(row) = rows.next()? {
             let count: i64 = row.get(0)?;
             Ok(count as u64)
@@ -227,10 +231,7 @@ impl QueryEngine {
             };
 
             let file_sql = file.to_string_lossy().replace('\'', "''");
-            let query = format!(
-                "SELECT COUNT(*) FROM read_parquet('{}')",
-                file_sql
-            );
+            let query = format!("SELECT COUNT(*) FROM read_parquet('{}')", file_sql);
             let count: i64 = conn.query_row(&query, [], |row| row.get(0))?;
 
             let entry = counts_map.entry((year, month)).or_insert(0);
@@ -239,16 +240,16 @@ impl QueryEngine {
 
         Ok(counts_map
             .into_iter()
-            .map(|((year, month), count)| PartitionCount {
-                year,
-                month,
-                count,
-            })
+            .map(|((year, month), count)| PartitionCount { year, month, count })
             .collect())
     }
 
     /// Apply filters to the query
-    fn apply_filters(&self, base_query: &str, filters: &QueryFilters) -> (String, Vec<duckdb::types::Value>) {
+    fn apply_filters(
+        &self,
+        base_query: &str,
+        filters: &QueryFilters,
+    ) -> (String, Vec<duckdb::types::Value>) {
         let mut query = base_query.to_string();
         let mut params = Vec::new();
 
@@ -285,12 +286,17 @@ impl QueryEngine {
     }
 
     /// Execute a query that returns a list of changesets
-    fn execute_query(&self, query: &str, params: Vec<duckdb::types::Value>) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
+    fn execute_query(
+        &self,
+        query: &str,
+        params: Vec<duckdb::types::Value>,
+    ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(query)?;
-        
+
         // Convert Vec<Value> to slice of references which duckdb expects
-        let params_refs: Vec<&dyn duckdb::ToSql> = params.iter().map(|v| v as &dyn duckdb::ToSql).collect();
+        let params_refs: Vec<&dyn duckdb::ToSql> =
+            params.iter().map(|v| v as &dyn duckdb::ToSql).collect();
 
         let mut rows = stmt.query(params_refs.as_slice())?;
         let mut changesets = Vec::new();
@@ -418,16 +424,16 @@ fn parse_partition_key(path: &Path) -> Option<(u32, u32)> {
 
 // Helper module to handle serde deserialization from DuckDB rows
 mod serde_duckdb {
-    use crate::models::Changeset;
-    use duckdb::{Row, types::Value};
-    use std::collections::HashMap;
     use super::timestamp_millis_from_value;
+    use crate::models::Changeset;
+    use duckdb::{types::Value, Row};
+    use std::collections::HashMap;
 
     pub fn from_row(row: &Row) -> Result<Changeset, duckdb::Error> {
         // Manually map fields because automated serde integration might be tricky with DuckDB's types
         // especially for the HashMap tags.
         // For now, let's try to map field by field.
-        
+
         let id: i64 = row.get("id")?;
         let created_at = row
             .get::<_, Value>("created_at")
@@ -446,14 +452,14 @@ mod serde_duckdb {
         let max_lon: Option<f64> = row.get("max_lon").ok();
         let num_changes: u32 = row.get::<_, i32>("num_changes")? as u32; // DuckDB might return i32
         let comments_count: u32 = row.get::<_, i32>("comments_count")? as u32;
-        let description: Option<String> = row.get("description").ok(); 
-        
+        let description: Option<String> = row.get("description").ok();
+
         // Tags handling: DuckDB Map -> HashMap
-        // FIXME: Implement tag parsing from DuckDB Value. 
+        // FIXME: Implement tag parsing from DuckDB Value.
         // Current duckdb crate version's OrderedMap is opaque (private field) and doesn't implement IntoIterator.
         // We might need to cast to JSON in SQL or wait for upstream fix.
-        let tags: HashMap<String, String> = HashMap::new(); 
-        /* 
+        let tags: HashMap<String, String> = HashMap::new();
+        /*
         let tags_val: Value = row.get("tags").unwrap_or(Value::Null);
         let tags: HashMap<String, String> = match tags_val {
             Value::Map(entries) => {

@@ -11,13 +11,13 @@
 //! - 200 OK with JSON metadata
 //! - 500 Internal Server Error if metadata unavailable
 
+use crate::state::AppState;
 use axum::{extract::State, Json};
+use chrono::{SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use chrono::{SecondsFormat, TimeZone, Utc};
-use crate::state::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthResponse {
@@ -235,9 +235,9 @@ fn latest_modified_rfc3339(files: &[PathBuf]) -> Option<String> {
 mod tests {
     use super::*;
     use crate::query::QueryEngine;
+    use duckdb::Connection;
     use std::sync::Arc;
     use std::time::Instant;
-    use duckdb::Connection;
     use tempfile::TempDir;
 
     fn setup_state() -> (TempDir, AppState) {

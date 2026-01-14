@@ -2,11 +2,11 @@
 //!
 //! Formats changesets in JSON format.
 
-use crate::models::Changeset;
 use crate::format::Formatter;
-use serde::{Serialize, Deserialize};
+use crate::models::Changeset;
+use chrono::{SecondsFormat, TimeZone, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{TimeZone, Utc, SecondsFormat};
 
 /// JSON formatter for changeset output
 pub struct JsonFormatter {
@@ -70,16 +70,21 @@ impl JsonFormatter {
     fn to_json_changeset(&self, changeset: &Changeset) -> JsonChangeset {
         let mut tags = changeset.tags.clone();
         if let Some(description) = &changeset.description {
-            tags.entry("comment".to_string()).or_insert_with(|| description.clone());
+            tags.entry("comment".to_string())
+                .or_insert_with(|| description.clone());
         }
 
         JsonChangeset {
             id: changeset.id,
             created_at: changeset.created_at.and_then(|ts| {
-                Utc.timestamp_millis_opt(ts).single().map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
+                Utc.timestamp_millis_opt(ts)
+                    .single()
+                    .map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
             }),
             closed_at: changeset.closed_at.and_then(|ts| {
-                Utc.timestamp_millis_opt(ts).single().map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
+                Utc.timestamp_millis_opt(ts)
+                    .single()
+                    .map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
             }),
             open: changeset.open,
             user: changeset.user.clone(),
@@ -96,7 +101,10 @@ impl JsonFormatter {
 }
 
 impl Formatter for JsonFormatter {
-    fn format_changeset(&self, changeset: &Changeset) -> Result<String, Box<dyn std::error::Error>> {
+    fn format_changeset(
+        &self,
+        changeset: &Changeset,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let response = SingleJsonResponse {
             version: "0.6".to_string(),
             generator: "changeset-historic-api/0.1.0".to_string(),
@@ -113,14 +121,20 @@ impl Formatter for JsonFormatter {
         }
     }
 
-    fn format_changesets(&self, changesets: &[Changeset]) -> Result<String, Box<dyn std::error::Error>> {
+    fn format_changesets(
+        &self,
+        changesets: &[Changeset],
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let response = JsonResponse {
             version: "0.6".to_string(),
             generator: "changeset-historic-api/0.1.0".to_string(),
             copyright: "OpenStreetMap and contributors".to_string(),
             attribution: "http://www.openstreetmap.org/copyright".to_string(),
             license: "http://opendatacommons.org/licenses/odbl/1-0/".to_string(),
-            changesets: changesets.iter().map(|c| self.to_json_changeset(c)).collect(),
+            changesets: changesets
+                .iter()
+                .map(|c| self.to_json_changeset(c))
+                .collect(),
         };
 
         if self.pretty {
@@ -138,7 +152,11 @@ mod tests {
     use serde_json::Value;
     use std::collections::HashMap;
 
-    fn build_changeset(id: i64, description: Option<&str>, tags: HashMap<String, String>) -> Changeset {
+    fn build_changeset(
+        id: i64,
+        description: Option<&str>,
+        tags: HashMap<String, String>,
+    ) -> Changeset {
         Changeset {
             id,
             created_at: None,

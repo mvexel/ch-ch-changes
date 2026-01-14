@@ -1,21 +1,16 @@
 //! Batch and range changeset route handlers
 
-use axum::{
-    extract::{Path, Query, State},
-    http::{StatusCode, header},
-    response::{IntoResponse, Response},
-};
-use serde::Deserialize;
-use chrono::{NaiveDate, Utc, TimeZone};
-use crate::state::AppState;
+use crate::format::{json::JsonFormatter, jsonl::JsonLinesFormatter, xml::XmlFormatter, Formatter};
 use crate::models::Changeset;
 use crate::query::engine::QueryFilters;
-use crate::format::{
-    xml::XmlFormatter,
-    json::JsonFormatter,
-    jsonl::JsonLinesFormatter,
-    Formatter,
+use crate::state::AppState;
+use axum::{
+    extract::{Path, Query, State},
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
 };
+use chrono::{NaiveDate, TimeZone, Utc};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct QueryParams {
@@ -76,7 +71,9 @@ fn format_response(changesets: &[Changeset], format: Option<&str>, pretty: bool)
         Some("jsonl") | Some("jsonlines") => {
             let formatter = JsonLinesFormatter::new();
             match formatter.format_changesets(changesets) {
-                Ok(jsonl) => ([(header::CONTENT_TYPE, "application/x-ndjson")], jsonl).into_response(),
+                Ok(jsonl) => {
+                    ([(header::CONTENT_TYPE, "application/x-ndjson")], jsonl).into_response()
+                }
                 Err(e) => {
                     tracing::error!("Formatting error: {}", e);
                     StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -115,9 +112,9 @@ pub async fn get_changesets_by_day(
     let end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
 
     match state.engine.get_changesets_by_date_range(
-        &start.to_rfc3339(), 
-        &end.to_rfc3339(), 
-        &params.to_filters()
+        &start.to_rfc3339(),
+        &end.to_rfc3339(),
+        &params.to_filters(),
     ) {
         Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
         Err(e) => {
@@ -133,11 +130,10 @@ async fn handle_id_range(
     end_id: i64,
     params: QueryParams,
 ) -> Response {
-    match state.engine.get_changesets_by_id_range(
-        start_id, 
-        end_id, 
-        &params.to_filters()
-    ) {
+    match state
+        .engine
+        .get_changesets_by_id_range(start_id, end_id, &params.to_filters())
+    {
         Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
         Err(e) => {
             tracing::error!("Query error: {}", e);
@@ -162,9 +158,9 @@ async fn handle_date_range(
     };
 
     match state.engine.get_changesets_by_date_range(
-        &start_date.to_rfc3339(), 
-        &end_date.to_rfc3339(), 
-        &params.to_filters()
+        &start_date.to_rfc3339(),
+        &end_date.to_rfc3339(),
+        &params.to_filters(),
     ) {
         Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
         Err(e) => {
@@ -378,7 +374,9 @@ mod tests {
             .and_then(|value| value.to_str().ok());
         assert_eq!(content_type, Some("application/json"));
 
-        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
         let value: Value = serde_json::from_slice(&body).expect("json");
         let changesets = value["changesets"].as_array().expect("changesets");
         assert_eq!(changesets.len(), 1);
@@ -423,7 +421,9 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
         let value: Value = serde_json::from_slice(&body).expect("json");
         let changesets = value["changesets"].as_array().expect("changesets");
         assert_eq!(changesets.len(), 1);
@@ -468,7 +468,9 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
         let value: Value = serde_json::from_slice(&body).expect("json");
         let changesets = value["changesets"].as_array().expect("changesets");
         assert_eq!(changesets.len(), 1);
@@ -513,7 +515,9 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
         let value: Value = serde_json::from_slice(&body).expect("json");
         let changesets = value["changesets"].as_array().expect("changesets");
         assert_eq!(changesets.len(), 2);
@@ -537,7 +541,9 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
         let value: Value = serde_json::from_slice(&body).expect("json");
         let changesets = value["changesets"].as_array().expect("changesets");
         assert_eq!(changesets.len(), 2);
@@ -548,7 +554,11 @@ mod tests {
         let (_dir, state) = setup_state();
         let response = get_changesets_by_minute(
             State(state),
-            Path(("20240501".to_string(), "00".to_string(), "00.jsonl".to_string())),
+            Path((
+                "20240501".to_string(),
+                "00".to_string(),
+                "00.jsonl".to_string(),
+            )),
             Query(QueryParams {
                 format: None,
                 user: None,

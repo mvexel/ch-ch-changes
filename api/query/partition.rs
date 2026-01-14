@@ -80,10 +80,7 @@ impl PartitionResolver {
     /// # TODO
     /// - Parse date (YYYYMMDD format)
     /// - Find partition containing date
-    pub fn get_partition_for_date(
-        &self,
-        date: &str,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn get_partition_for_date(&self, date: &str) -> Result<String, Box<dyn std::error::Error>> {
         // TODO: Implement
         Err("Not implemented".into())
     }
@@ -93,10 +90,7 @@ impl PartitionResolver {
     /// # TODO
     /// - Use ID range index
     /// - Find partition containing ID
-    pub fn get_partition_for_id(
-        &self,
-        id: i64,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn get_partition_for_id(&self, id: i64) -> Result<String, Box<dyn std::error::Error>> {
         // TODO: Implement
         Err("Not implemented".into())
     }

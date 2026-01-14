@@ -2,29 +2,27 @@
 //!
 //! A high-performance HTTP API for querying historic OSM changeset data from Parquet files.
 
+use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::env;
 use std::time::Instant;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber;
 
-mod models;
-mod routes;
-mod query;
 mod format;
+mod models;
+mod query;
+mod routes;
 mod state;
 
-use crate::state::AppState;
 use crate::query::engine::QueryEngine;
 use crate::routes::create_router;
+use crate::state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     // Load configuration
     let data_path = env::var("DATA_PATH").unwrap_or_else(|_| "./data".to_string());
@@ -42,8 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create router
-    let app = create_router(state)
-        .layer(CorsLayer::permissive());
+    let app = create_router(state).layer(CorsLayer::permissive());
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));

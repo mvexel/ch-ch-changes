@@ -6,8 +6,8 @@ use arrow::array::{
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use bzip2::read::MultiBzDecoder;
-use clap::Parser;
 use changesets_to_parquet::Changeset;
+use clap::Parser;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -51,7 +51,6 @@ struct Args {
     #[arg(long, default_value_t = false)]
     continue_on_error: bool,
 }
-
 
 struct BatchBuilders {
     id: Int64Builder,
@@ -255,8 +254,7 @@ impl PartitionedWriter {
             let file = File::create(&file_path)
                 .with_context(|| format!("Failed to create partition file: {:?}", file_path))?;
 
-            let writer =
-                ArrowWriter::try_new(file, self.schema.clone(), Some(self.props.clone()))?;
+            let writer = ArrowWriter::try_new(file, self.schema.clone(), Some(self.props.clone()))?;
             self.writers.insert(key.clone(), writer);
             self.builders
                 .insert(key.clone(), BatchBuilders::with_capacity(self.batch_size));
@@ -466,8 +464,7 @@ impl IndexCollector {
         let capacity = self.user_stats.len();
         let mut uid_builder = Int64Builder::with_capacity(capacity);
         let mut username_builder = StringBuilder::with_capacity(capacity, capacity * 16);
-        let mut count_builder =
-            arrow::array::UInt64Builder::with_capacity(capacity);
+        let mut count_builder = arrow::array::UInt64Builder::with_capacity(capacity);
         let mut first_builder = TimestampMillisecondBuilder::with_capacity(capacity);
         let mut last_builder = TimestampMillisecondBuilder::with_capacity(capacity);
 
@@ -674,10 +671,16 @@ fn parse_and_write_changesets<R: std::io::Read>(
                 eprintln!("======================\n");
 
                 if continue_on_error {
-                    eprintln!("Continuing with {} successfully parsed changesets...", count);
+                    eprintln!(
+                        "Continuing with {} successfully parsed changesets...",
+                        count
+                    );
                     break;
                 } else {
-                    return Err(anyhow::anyhow!("Error parsing XML: {}. Use --continue-on-error to save partial results.", e));
+                    return Err(anyhow::anyhow!(
+                        "Error parsing XML: {}. Use --continue-on-error to save partial results.",
+                        e
+                    ));
                 }
             }
             _ => {}
@@ -766,7 +769,10 @@ fn parse_and_write_partitioned<R: std::io::Read>(
                 eprintln!("======================\n");
 
                 if continue_on_error {
-                    eprintln!("Continuing with {} successfully parsed changesets...", count);
+                    eprintln!(
+                        "Continuing with {} successfully parsed changesets...",
+                        count
+                    );
                     break;
                 } else {
                     return Err(anyhow::anyhow!(

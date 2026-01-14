@@ -7,14 +7,17 @@ pub mod changeset;
 pub mod changesets;
 pub mod meta;
 
-use axum::{Router, routing::get};
 use crate::AppState;
+use axum::{routing::get, Router};
 
 /// Create the main API router with all routes
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/changeset/:id", get(changeset::get_changeset))
-        .route("/changesets/day/:date", get(changesets::get_changesets_by_day))
+        .route(
+            "/changesets/day/:date",
+            get(changesets::get_changesets_by_day),
+        )
         .route(
             "/changesets/day/:date/hour/:hour",
             get(changesets::get_changesets_by_hour),
@@ -23,7 +26,10 @@ pub fn create_router(state: AppState) -> Router {
             "/changesets/day/:date/hour/:hour/minute/:minute",
             get(changesets::get_changesets_by_minute),
         )
-        .route("/changesets/from/:start/to/:end", get(changesets::get_changesets_range))
+        .route(
+            "/changesets/from/:start/to/:end",
+            get(changesets::get_changesets_range),
+        )
         .route("/health", get(meta::health))
         .route("/meta/tip", get(meta::get_tip))
         .route("/meta/coverage", get(meta::get_coverage))
