@@ -38,10 +38,16 @@ chmod +x "$RELEASE_DIR/changeset-server"
 
 # Step 4: Test the binary
 echo -e "\n${YELLOW}[4/7] Testing binary...${NC}"
-if ! "$RELEASE_DIR/changeset-server" --version 2>/dev/null; then
-    # Binary doesn't support --version, that's ok
-    echo "Binary executable check passed"
+if [ ! -x "$RELEASE_DIR/changeset-server" ]; then
+    echo -e "${RED}Error: Binary is not executable${NC}"
+    exit 1
 fi
+# Just verify it's a valid ELF binary
+if ! file "$RELEASE_DIR/changeset-server" | grep -q "ELF.*executable"; then
+    echo -e "${RED}Error: Not a valid executable${NC}"
+    exit 1
+fi
+echo "Binary check passed"
 
 # Step 5: Update symlinks
 echo -e "\n${YELLOW}[5/7] Updating symlinks...${NC}"
