@@ -5,11 +5,9 @@
 use crate::models::Changeset;
 use crate::query::{PartitionResolver, QueryBuilder};
 use duckdb::{
-    params,
     types::{TimeUnit, Value},
     Connection,
 };
-use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -160,7 +158,74 @@ impl QueryEngine {
         self.execute_query_sql(&query)
     }
 
+    /// Stream changesets by date range through a channel
+    /// 
+    /// Unlike `get_changesets_by_date_range`, this method sends each changeset
+    /// through the provided channel as it's read, enabling streaming responses.
+    pub fn stream_changesets_by_date_range(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        filters: &QueryFilters,
+        tx: tokio::sync::mpsc::Sender<Changeset>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let start_ts = chrono::DateTime::parse_from_rfc3339(start_date)?;
+        let end_ts = chrono::DateTime::parse_from_rfc3339(end_date)?;
+        if start_ts > end_ts {
+            return Ok(());
+        }
+
+        let start_str = start_ts.naive_utc().format("%F %T").to_string();
+        let end_str = end_ts.naive_utc().format("%F %T").to_string();
+
+        let partitions = self
+            .partition_resolver
+            .get_partitions_for_date_range(start_date, end_date)
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        if partitions.is_empty() {
+            return Ok(());
+        }
+
+        let mut builder = QueryBuilder::new()
+            .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
+            .filter_date_range(&start_str, &end_str)
+            .deduplicate();
+        builder = self.apply_filters_to_builder(builder, filters, true);
+        let query = builder.build();
+        self.stream_query_sql(&query, tx)
+    }
+
+    /// Stream changesets by ID range through a channel
+    pub fn stream_changesets_by_id_range(
+        &self,
+        start_id: i64,
+        end_id: i64,
+        filters: &QueryFilters,
+        tx: tokio::sync::mpsc::Sender<Changeset>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if start_id > end_id {
+            return Ok(());
+        }
+
+        let partitions = self
+            .partition_resolver
+            .get_partitions_for_id_range(start_id, end_id)
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+        if partitions.is_empty() {
+            return Ok(());
+        }
+
+        let mut builder = QueryBuilder::new()
+            .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
+            .filter_id_range(start_id, end_id)
+            .deduplicate();
+        builder = self.apply_filters_to_builder(builder, filters, true);
+        let query = builder.build();
+        self.stream_query_sql(&query, tx)
+    }
+
     /// Query changesets by user
+    #[allow(dead_code)]
     pub fn get_changesets_by_user(
         &self,
         username: &str,
@@ -356,6 +421,28 @@ impl QueryEngine {
 
         Ok(changesets)
     }
+
+    /// Execute a query and stream results through a channel
+    fn stream_query_sql(
+        &self,
+        query: &str,
+        tx: tokio::sync::mpsc::Sender<Changeset>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(query)?;
+        let mut rows = stmt.query([])?;
+
+        while let Some(row) = rows.next()? {
+            let changeset = serde_duckdb::from_row(&row)?;
+            // Use blocking_send since we're in a sync context
+            // If the receiver is dropped, we stop sending
+            if tx.blocking_send(changeset).is_err() {
+                break;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Query filters that can be applied to any query
@@ -414,6 +501,7 @@ fn timestamp_millis_from_value(value: Value) -> Option<i64> {
     }
 }
 
+#[allow(dead_code)]
 fn partition_u32_from_value(value: Value) -> Option<u32> {
     match value {
         Value::Int(value) => u32::try_from(value).ok(),

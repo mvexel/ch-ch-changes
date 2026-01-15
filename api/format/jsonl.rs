@@ -3,7 +3,7 @@
 //! Formats changesets in JSONL format - one JSON object per line.
 //! Best for streaming and bulk processing of large datasets.
 
-use crate::format::Formatter;
+use crate::format::{Formatter, StreamingFormatter};
 use crate::models::Changeset;
 use chrono::{SecondsFormat, TimeZone, Utc};
 use serde::Serialize;
@@ -101,6 +101,27 @@ impl Formatter for JsonLinesFormatter {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(lines.join("\n"))
+    }
+}
+
+impl StreamingFormatter for JsonLinesFormatter {
+    fn content_type(&self) -> &'static str {
+        "application/x-ndjson"
+    }
+
+    fn stream_header(&self) -> String {
+        String::new()
+    }
+
+    fn stream_item(&self, changeset: &Changeset, _is_first: bool) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let jsonl_changeset = self.to_jsonl_changeset(changeset);
+        let mut line = serde_json::to_string(&jsonl_changeset)?;
+        line.push('\n');
+        Ok(line)
+    }
+
+    fn stream_footer(&self) -> String {
+        String::new()
     }
 }
 

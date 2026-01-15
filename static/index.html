@@ -114,17 +114,36 @@ curl https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
 
     <h3>Query Parameters</h3>
 
-    <p>Batch endpoints (day/hour/minute/range) support filtering and pagination:</p>
+    <p>Batch endpoints (day/hour/minute/range) support filtering, pagination, and streaming:</p>
     <ul>
         <li><code>user</code> - Filter by username (e.g., <code>?user=alice</code>)</li>
         <li><code>uid</code> - Filter by user ID (e.g., <code>?uid=123</code>)</li>
         <li><code>open</code> - Filter by open/closed status (e.g., <code>?open=true</code>)</li>
         <li><code>limit</code> - Limit number of results (e.g., <code>?limit=100</code>)</li>
         <li><code>offset</code> - Offset for pagination (e.g., <code>?offset=100</code>)</li>
+        <li><code>stream</code> - Enable streaming responses for large result sets (e.g., <code>?stream=true</code>)</li>
     </ul>
 
     <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
-curl "https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
+curl "https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"
+
+# Example: Stream large date range (useful with curl -N to disable buffering)
+curl -N "https://DOMAIN/changesets/date/from/20240101/to/20240131.jsonl?stream=true"</code></pre>
+
+    <h4>Streaming Responses</h4>
+
+    <p>For large queries (date ranges, busy days), use <code>?stream=true</code> to get incremental results instead of waiting for the entire response to buffer. This is especially useful with JSONL format:</p>
+    <ul>
+        <li>Results are sent as they're retrieved from the database</li>
+        <li>Lower memory usage on both client and server</li>
+        <li>Faster time-to-first-byte for large queries</li>
+        <li>Works with all formats (JSON, JSONL, XML)</li>
+    </ul>
+
+    <pre><code># Stream changesets and process them incrementally
+curl -N "https://DOMAIN/changesets/day/20240115.jsonl?stream=true" | while read line; do
+  echo "$line" | jq .id
+done</code></pre>
 
     <p>Remember that <em>OSM usernames are case-sensitive, so <code>alice</code> is probably not the same mapper as <code>Alice</code></em>.</p>
 
@@ -133,16 +152,25 @@ curl "https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"</code></p
     <p>Each changeset includes:</p>
     <ul>
         <li><code>id</code> - Changeset ID (integer)</li>
-        <li><code>created_at</code> - Timestamp</li>
-        <li><code>closed_at</code> - Timestamp (if closed)</li>
-        <li><code>open</code> - Boolean</li>
+        <li><code>created_at</code> - Timestamp (ISO 8601 format)</li>
+        <li><code>closed_at</code> - Timestamp (ISO 8601 format, optional - only present if changeset is closed)</li>
+        <li><code>open</code> - Boolean (true if changeset is still open)</li>
         <li><code>user</code> - Username (string)</li>
         <li><code>uid</code> - User ID (integer)</li>
-        <li><code>num_changes</code> - Number of edits</li>
-        <li><code>comments_count</code> - Number of comments</li>
-        <li><code>bbox</code> - Bounding box (struct)</li>
-        <li><code>tags</code> - Key-value tags (map)</li>
+        <li><code>changes_count</code> - Number of edits in this changeset (integer)</li>
+        <li><code>comments_count</code> - Number of discussion comments (integer)</li>
+        <li><code>min_lat</code>, <code>max_lat</code>, <code>min_lon</code>, <code>max_lon</code> - Bounding box coordinates (decimal degrees, optional - only present if changeset has geographic extent)</li>
+        <li><code>tags</code> - Key-value metadata tags (map/object). Common tags include:
+            <ul>
+                <li><code>comment</code> - Changeset description/summary</li>
+                <li><code>created_by</code> - Editor software used</li>
+                <li><code>imagery_used</code> - Aerial imagery sources</li>
+                <li><code>source</code> - Data sources</li>
+            </ul>
+        </li>
     </ul>
+
+    <p><strong>Note:</strong> In XML format, changeset comments/descriptions appear as a <code>comment</code> tag. In JSON/JSONL, the same information is in <code>tags.comment</code>.</p>
 
     <h2>Rate Limits</h2>
 

@@ -2,7 +2,8 @@
 //!
 //! Formats changesets in JSON format.
 
-use crate::format::Formatter;
+use crate::format::{Formatter, StreamingFormatter};
+use crate::generator_string;
 use crate::models::Changeset;
 use chrono::{SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -107,7 +108,7 @@ impl Formatter for JsonFormatter {
     ) -> Result<String, Box<dyn std::error::Error>> {
         let response = SingleJsonResponse {
             version: "0.6".to_string(),
-            generator: "changeset-historic-api/0.3.0".to_string(),
+            generator: generator_string(),
             copyright: "OpenStreetMap and contributors".to_string(),
             attribution: "http://www.openstreetmap.org/copyright".to_string(),
             license: "http://opendatacommons.org/licenses/odbl/1-0/".to_string(),
@@ -127,7 +128,7 @@ impl Formatter for JsonFormatter {
     ) -> Result<String, Box<dyn std::error::Error>> {
         let response = JsonResponse {
             version: "0.6".to_string(),
-            generator: "changeset-historic-api/0.3.0".to_string(),
+            generator: generator_string(),
             copyright: "OpenStreetMap and contributors".to_string(),
             attribution: "http://www.openstreetmap.org/copyright".to_string(),
             license: "http://opendatacommons.org/licenses/odbl/1-0/".to_string(),
@@ -142,6 +143,33 @@ impl Formatter for JsonFormatter {
         } else {
             Ok(serde_json::to_string(&response)?)
         }
+    }
+}
+
+impl StreamingFormatter for JsonFormatter {
+    fn content_type(&self) -> &'static str {
+        "application/json"
+    }
+
+    fn stream_header(&self) -> String {
+        format!(
+            r#"{{"version":"0.6","generator":"{}","copyright":"OpenStreetMap and contributors","attribution":"http://www.openstreetmap.org/copyright","license":"http://opendatacommons.org/licenses/odbl/1-0/","changesets":["#,
+            generator_string()
+        )
+    }
+
+    fn stream_item(&self, changeset: &Changeset, is_first: bool) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let json_changeset = self.to_json_changeset(changeset);
+        let item = serde_json::to_string(&json_changeset)?;
+        if is_first {
+            Ok(item)
+        } else {
+            Ok(format!(",{}", item))
+        }
+    }
+
+    fn stream_footer(&self) -> String {
+        "]}".to_string()
     }
 }
 

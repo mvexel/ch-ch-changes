@@ -32,6 +32,7 @@ pub struct ApiError {
     pub details: Option<String>,
 }
 
+#[allow(dead_code)]
 impl ApiError {
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self {

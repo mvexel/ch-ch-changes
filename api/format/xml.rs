@@ -2,12 +2,18 @@
 //!
 //! Formats changesets in OSM XML format, compatible with the official OSM replication format.
 
-use crate::format::Formatter;
+use crate::format::{Formatter, StreamingFormatter};
+use crate::generator_string;
 use crate::models::Changeset;
 use chrono::{SecondsFormat, TimeZone, Utc};
 use std::borrow::Cow;
 
-const OSM_ROOT_OPEN: &str = "<osm version=\"0.6\" generator=\"changeset-historic-api/0.3.0\" copyright=\"OpenStreetMap and contributors\" attribution=\"http://www.openstreetmap.org/copyright\" license=\"http://opendatacommons.org/licenses/odbl/1-0/\">\n";
+fn osm_root_open() -> String {
+    format!(
+        "<osm version=\"0.6\" generator=\"{}\" copyright=\"OpenStreetMap and contributors\" attribution=\"http://www.openstreetmap.org/copyright\" license=\"http://opendatacommons.org/licenses/odbl/1-0/\">\n",
+        generator_string()
+    )
+}
 
 /// XML formatter for OSM changeset output
 pub struct XmlFormatter;
@@ -19,7 +25,7 @@ impl XmlFormatter {
     }
 
     /// Escape XML special characters
-    fn escape_xml(s: &str) -> Cow<str> {
+    fn escape_xml(s: &str) -> Cow<'_, str> {
         if s.contains(|c| matches!(c, '&' | '<' | '>' | '"' | '\'')) {
             let mut result = String::with_capacity(s.len() + 10);
             for c in s.chars() {
@@ -139,7 +145,7 @@ impl Formatter for XmlFormatter {
         changeset: &Changeset,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(OSM_ROOT_OPEN);
+        xml.push_str(&osm_root_open());
         xml.push_str(&self.format_changeset_element(changeset));
         xml.push_str("</osm>");
         Ok(xml)
@@ -150,12 +156,32 @@ impl Formatter for XmlFormatter {
         changesets: &[Changeset],
     ) -> Result<String, Box<dyn std::error::Error>> {
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        xml.push_str(OSM_ROOT_OPEN);
+        xml.push_str(&osm_root_open());
         for changeset in changesets {
             xml.push_str(&self.format_changeset_element(changeset));
         }
         xml.push_str("</osm>");
         Ok(xml)
+    }
+}
+
+impl StreamingFormatter for XmlFormatter {
+    fn content_type(&self) -> &'static str {
+        "application/xml"
+    }
+
+    fn stream_header(&self) -> String {
+        let mut header = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        header.push_str(&osm_root_open());
+        header
+    }
+
+    fn stream_item(&self, changeset: &Changeset, _is_first: bool) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.format_changeset_element(changeset))
+    }
+
+    fn stream_footer(&self) -> String {
+        "</osm>".to_string()
     }
 }
 

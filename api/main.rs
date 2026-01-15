@@ -7,13 +7,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tower_http::cors::CorsLayer;
-use tracing_subscriber;
 
+mod constants;
 mod format;
 mod models;
 mod query;
 mod routes;
 mod state;
+
+// Re-export constants at crate root for use by submodules
+pub use constants::{generator_string, API_VERSION};
 
 use crate::query::engine::QueryEngine;
 use crate::routes::create_router;

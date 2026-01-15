@@ -8,4 +8,5 @@ pub mod metadata;
 
 pub use changeset::Changeset;
 pub use error::ApiError;
+#[allow(unused_imports)]
 pub use metadata::Metadata;

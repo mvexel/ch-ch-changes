@@ -31,6 +31,7 @@ impl QueryBuilder {
     }
 
     /// Select from specific Parquet file
+    #[allow(dead_code)]
     pub fn from_parquet(mut self, path: &str) -> Self {
         self.parquet_paths = vec![path.to_string()];
         self
@@ -43,6 +44,7 @@ impl QueryBuilder {
     }
 
     /// Add a WHERE clause
+    #[allow(dead_code)]
     pub fn where_clause(mut self, condition: &str) -> Self {
         if !condition.trim().is_empty() {
             self.where_clauses.push(condition.trim().to_string());

@@ -1,16 +1,22 @@
 //! Batch and range changeset route handlers
 
-use crate::format::{json::JsonFormatter, jsonl::JsonLinesFormatter, xml::XmlFormatter, Formatter};
+use crate::format::{
+    json::JsonFormatter, jsonl::JsonLinesFormatter, xml::XmlFormatter, Formatter,
+    StreamingFormatter,
+};
 use crate::models::{ApiError, Changeset};
 use crate::query::engine::QueryFilters;
 use crate::state::AppState;
 use axum::{
+    body::Body,
     extract::{Path, Query, State},
     http::header,
     response::{IntoResponse, Response},
 };
 use chrono::{NaiveDate, TimeZone, Utc};
 use serde::Deserialize;
+use std::convert::Infallible;
+
 
 #[derive(Debug, Deserialize)]
 pub struct QueryParams {
@@ -20,6 +26,8 @@ pub struct QueryParams {
     pub open: Option<bool>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+    /// Enable streaming response mode
+    pub stream: Option<bool>,
 }
 
 impl QueryParams {
@@ -93,6 +101,73 @@ fn format_response(changesets: &[Changeset], format: Option<&str>, pretty: bool)
     }
 }
 
+/// Create a streaming HTTP response from a channel of changesets
+fn create_streaming_response(
+    format: Option<&str>,
+    rx: tokio::sync::mpsc::Receiver<Changeset>,
+) -> Response {
+    // Determine content type and create appropriate stream based on format
+    match format {
+        Some("json") => {
+            let formatter = JsonFormatter::new(false);
+            let content_type = formatter.content_type();
+            let stream = create_format_stream(formatter, rx);
+            Response::builder()
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from_stream(stream))
+                .unwrap()
+        }
+        Some("jsonl") | Some("jsonlines") => {
+            let formatter = JsonLinesFormatter::new();
+            let content_type = formatter.content_type();
+            let stream = create_format_stream(formatter, rx);
+            Response::builder()
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from_stream(stream))
+                .unwrap()
+        }
+        _ => {
+            let formatter = XmlFormatter::new();
+            let content_type = formatter.content_type();
+            let stream = create_format_stream(formatter, rx);
+            Response::builder()
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from_stream(stream))
+                .unwrap()
+        }
+    }
+}
+
+/// Create an async stream that formats changesets using the given formatter
+fn create_format_stream<F: StreamingFormatter + 'static>(
+    formatter: F,
+    rx: tokio::sync::mpsc::Receiver<Changeset>,
+) -> impl futures_core::Stream<Item = Result<String, Infallible>> {
+    async_stream::stream! {
+        // Emit header
+        yield Ok::<_, Infallible>(formatter.stream_header());
+
+        let mut is_first = true;
+        let mut rx = rx;
+
+        while let Some(changeset) = rx.recv().await {
+            match formatter.stream_item(&changeset, is_first) {
+                Ok(item) => {
+                    yield Ok(item);
+                    is_first = false;
+                }
+                Err(e) => {
+                    tracing::error!("Streaming format error: {}", e);
+                    // Continue processing remaining items
+                }
+            }
+        }
+
+        // Emit footer
+        yield Ok(formatter.stream_footer());
+    }
+}
+
 pub async fn get_changesets_by_day(
     State(state): State<AppState>,
     Path(date_str_raw): Path<String>,
@@ -117,6 +192,24 @@ pub async fn get_changesets_by_day(
     let start = Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap());
     let end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
 
+    // Streaming mode
+    if params.stream.unwrap_or(false) {
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let engine = state.engine.clone();
+        let start_str = start.to_rfc3339();
+        let end_str = end.to_rfc3339();
+        let filters = params.to_filters();
+
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = engine.stream_changesets_by_date_range(&start_str, &end_str, &filters, tx) {
+                tracing::error!("Streaming query error: {}", e);
+            }
+        });
+
+        return create_streaming_response(params.format.as_deref(), rx);
+    }
+
+    // Non-streaming mode (existing behavior)
     match state.engine.get_changesets_by_date_range(
         &start.to_rfc3339(),
         &end.to_rfc3339(),
@@ -162,6 +255,22 @@ pub async fn get_changesets_by_id_range(
         }
     };
 
+    // Streaming mode
+    if params.stream.unwrap_or(false) {
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let engine = state.engine.clone();
+        let filters = params.to_filters();
+
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = engine.stream_changesets_by_id_range(start_id, end_id, &filters, tx) {
+                tracing::error!("Streaming query error: {}", e);
+            }
+        });
+
+        return create_streaming_response(params.format.as_deref(), rx);
+    }
+
+    // Non-streaming mode (existing behavior)
     match state
         .engine
         .get_changesets_by_id_range(start_id, end_id, &params.to_filters())
@@ -206,6 +315,24 @@ pub async fn get_changesets_by_date_range(
         }
     };
 
+    // Streaming mode
+    if params.stream.unwrap_or(false) {
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let engine = state.engine.clone();
+        let start = start_date.to_rfc3339();
+        let end = end_date.to_rfc3339();
+        let filters = params.to_filters();
+
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = engine.stream_changesets_by_date_range(&start, &end, &filters, tx) {
+                tracing::error!("Streaming query error: {}", e);
+            }
+        });
+
+        return create_streaming_response(params.format.as_deref(), rx);
+    }
+
+    // Non-streaming mode (existing behavior)
     match state.engine.get_changesets_by_date_range(
         &start_date.to_rfc3339(),
         &end_date.to_rfc3339(),
@@ -263,6 +390,24 @@ pub async fn get_changesets_by_hour(
     let start = Utc.from_utc_datetime(&start_naive);
     let end = Utc.from_utc_datetime(&end_naive);
 
+    // Streaming mode
+    if params.stream.unwrap_or(false) {
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let engine = state.engine.clone();
+        let start_str = start.to_rfc3339();
+        let end_str = end.to_rfc3339();
+        let filters = params.to_filters();
+
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = engine.stream_changesets_by_date_range(&start_str, &end_str, &filters, tx) {
+                tracing::error!("Streaming query error: {}", e);
+            }
+        });
+
+        return create_streaming_response(params.format.as_deref(), rx);
+    }
+
+    // Non-streaming mode (existing behavior)
     match state.engine.get_changesets_by_date_range(
         &start.to_rfc3339(),
         &end.to_rfc3339(),
@@ -331,6 +476,24 @@ pub async fn get_changesets_by_minute(
     let start = Utc.from_utc_datetime(&start_naive);
     let end = Utc.from_utc_datetime(&end_naive);
 
+    // Streaming mode
+    if params.stream.unwrap_or(false) {
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let engine = state.engine.clone();
+        let start_str = start.to_rfc3339();
+        let end_str = end.to_rfc3339();
+        let filters = params.to_filters();
+
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = engine.stream_changesets_by_date_range(&start_str, &end_str, &filters, tx) {
+                tracing::error!("Streaming query error: {}", e);
+            }
+        });
+
+        return create_streaming_response(params.format.as_deref(), rx);
+    }
+
+    // Non-streaming mode (existing behavior)
     match state.engine.get_changesets_by_date_range(
         &start.to_rfc3339(),
         &end.to_rfc3339(),
@@ -420,6 +583,7 @@ mod tests {
                 open: None,
                 limit: None,
                 offset: None,
+                stream: None,
             }),
         )
         .await;
@@ -453,6 +617,7 @@ mod tests {
                 open: None,
                 limit: None,
                 offset: None,
+                stream: None,
             }),
         )
         .await;
@@ -473,6 +638,7 @@ mod tests {
                 open: None,
                 limit: None,
                 offset: None,
+                stream: None,
             }),
         )
         .await;
@@ -500,6 +666,7 @@ mod tests {
                 open: None,
                 limit: None,
                 offset: None,
+                stream: None,
             }),
         )
         .await;
@@ -520,6 +687,7 @@ mod tests {
                 open: None,
                 limit: None,
                 offset: None,
+                stream: None,
             }),
         )
         .await;
@@ -547,6 +715,7 @@ mod tests {
                 open: None,
                 limit: None,
                 offset: None,
+                stream: None,
             }),
         )
         .await;
@@ -567,6 +736,7 @@ mod tests {
                 open: None,
                 limit: None,
                 offset: None,
+                stream: None,
             }),
         )
         .await;
@@ -593,6 +763,7 @@ mod tests {
                 open: None,
                 limit: None,
                 offset: None,
+                stream: None,
             }),
         )
         .await;
@@ -623,6 +794,7 @@ mod tests {
                 open: None,
                 limit: None,
                 offset: None,
+                stream: None,
             }),
         )
         .await;

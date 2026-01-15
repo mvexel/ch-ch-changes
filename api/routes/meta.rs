@@ -12,6 +12,7 @@
 //! - 500 Internal Server Error if metadata unavailable
 
 use crate::state::AppState;
+use crate::API_VERSION;
 use axum::{extract::State, Json};
 use chrono::{SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -69,7 +70,7 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 
     Json(HealthResponse {
         status: "ok".to_string(),
-        version: "0.3.0".to_string(),
+        version: API_VERSION.to_string(),
         uptime_seconds: state.started_at.elapsed().as_secs(),
         data_loaded,
         partition_count,

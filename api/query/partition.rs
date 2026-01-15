@@ -15,8 +15,10 @@ use std::path::{Path, PathBuf};
 /// - ID range fallback mapping (returns all partitions)
 /// - Partition filtering and pruning
 pub struct PartitionResolver {
+    #[allow(dead_code)]
     root: PathBuf,
     partitions_by_key: HashMap<(u32, u32), Vec<PartitionInfo>>,
+    #[allow(dead_code)]
     partitions_by_path: HashMap<String, PartitionInfo>,
     has_id_index: bool,
 }
@@ -154,7 +156,7 @@ impl PartitionResolver {
     }
 
     /// Get partitions for a specific date
-    ///
+    #[allow(dead_code)]
     pub fn get_partition_for_date(&self, date: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let (year, month) = parse_date_year_month(date)?;
         self.partitions_by_key
@@ -188,7 +190,7 @@ impl PartitionResolver {
     }
 
     /// Get metadata about a partition
-    ///
+    #[allow(dead_code)]
     pub fn get_partition_metadata(
         &self,
         partition: &str,
@@ -209,6 +211,7 @@ impl PartitionResolver {
 }
 
 /// Metadata about a partition.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PartitionInfo {
     pub path: String,
