@@ -4,6 +4,8 @@ There are two tools here:
 1. `changesets-to-parquet` This tool converts the OSM Changeset metadata dump (.osm.bz2) to a proper parquet file you can query using DuckDB.
 2. `changeset-server`: A server that exposes an API and remote parquet query access using the output of the above.
 
+> This toolkit only deals with changeset **metadata**, not with the actual map edits the changeset represents.
+
 ## Converter
 
 ### Usage
@@ -14,7 +16,9 @@ First, download a changeset dump file from https://planet.osm.org/.
 changesets-to-parquet --input changesets-latest.osm.bz2 --output changesets.parquet 
 ```
 
-There are additional options for chunk size, partitioning and adding a couple of different indexes to speed up common queries. See `changesets-to-parquet --help` for more.
+There are additional options for chunk size, partitioning and adding a couple of different indexes to speed up common queries. See `changesets-to-parquet --help` for more. 
+
+You can achieve significant speed-up by using `pbzip2` for multithreaded decompression and piping that into the tool, especially if used with multiple workers (`--workers N`)
 
 ## Server
 
@@ -33,18 +37,6 @@ DATA_PATH=/path/to/parquet/ .changeset-server
 - `GET /changesets/from/{start}/to/{end}` - Date range (only handles entire days) response can be huge!
 - `GET /meta/tip` - Latest changeset ID
 - `GET /meta/coverage` - Available date range
-
-You can also query with DuckDB directly (if hosted remotely)
-
-```
-duckdb -c "
-  SELECT COUNT(*)
-  FROM read_parquet('https://your.server/data/changesets_2024_*.parquet')
-```
-
-## Querying with DuckDB
-
-Some examples [DUCKDB_QUERY_EXAMPLES.md](here).
 
 ## Geoparquet?
 

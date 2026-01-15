@@ -1,5 +1,12 @@
 use std::collections::HashMap;
 
+pub mod builder;
+pub mod indexing;
+pub mod models;
+pub mod parsing;
+pub mod schema;
+pub mod writer;
+
 /// Represents a changeset in the OSM data
 #[derive(Debug, Default, Clone)]
 pub struct Changeset {
