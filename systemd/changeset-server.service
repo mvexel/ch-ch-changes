@@ -1,0 +1,42 @@
+[Unit]
+Description=OSM Changeset Server
+Documentation=https://codeberg.org/mvexel/changesets-to-parquet
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=changeset
+Group=changeset
+WorkingDirectory=/opt/changeset-server
+
+# Environment variables
+Environment="DATA_PATH=/data/parquet"
+Environment="RUST_LOG=info"
+
+# Binary location
+ExecStart=/opt/changeset-server/bin/changeset-server
+
+# Restart policy - crucial for automatic recovery from failures
+Restart=always
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/parquet
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=4G
+CPUQuota=200%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=changeset-server
+
+[Install]
+WantedBy=multi-user.target
