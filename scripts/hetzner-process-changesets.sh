@@ -195,13 +195,19 @@ fi
 # Wait for cloud-init to complete
 log "Waiting for cloud-init to complete..."
 for i in {1..60}; do
-    if ssh -o StrictHostKeyChecking=no root@$SERVER_IP \
-        "cloud-init status --wait" &>/dev/null; then
+    CLOUD_INIT_STATUS=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$SERVER_IP \
+        "cloud-init status" 2>/dev/null | awk '/status:/ {print $2}' || echo "unknown")
+
+    if [ "$CLOUD_INIT_STATUS" = "done" ]; then
         log "Cloud-init complete!"
         break
+    elif [ "$CLOUD_INIT_STATUS" = "error" ]; then
+        log "WARNING: Cloud-init finished with errors, continuing anyway..."
+        break
     fi
+
     if [ $((i % 6)) -eq 0 ]; then
-        log "Still waiting for cloud-init... (${i}/60 attempts)"
+        log "Still waiting for cloud-init... (${i}/60 attempts, status: $CLOUD_INIT_STATUS)"
     fi
     sleep 10
 done
