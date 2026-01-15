@@ -64,12 +64,19 @@ log_info "Output directory: $TEMP_OUTPUT_DIR"
 
 START_TIME=$(date +%s)
 
-changesets-to-parquet \
+PROCESS_CMD=(changesets-to-parquet \
     --input "$DOWNLOAD_DIR/$CHANGESET_FILE" \
     --output-dir "$TEMP_OUTPUT_DIR" \
     --partition \
     --generate-indexes \
-    --batch-size 100000 || {
+    --batch-size 100000)
+
+# Force line-buffered output so remote log tailing stays responsive.
+if command -v stdbuf >/dev/null 2>&1; then
+    PROCESS_CMD=(stdbuf -oL -eL "${PROCESS_CMD[@]}")
+fi
+
+"${PROCESS_CMD[@]}" || {
     log_error "Parquet conversion failed"
     exit 1
 }
