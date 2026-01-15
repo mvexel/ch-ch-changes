@@ -3,10 +3,11 @@
 //! Handles requests for individual changesets by ID.
 
 use crate::format::{json::JsonFormatter, xml::XmlFormatter, Formatter};
+use crate::models::ApiError;
 use crate::state::AppState;
 use axum::{
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::header,
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -24,7 +25,7 @@ pub async fn get_changeset(
 ) -> Response {
     let (id, path_format) = match parse_id_and_format(&raw_id) {
         Ok(parsed) => parsed,
-        Err(status) => return status.into_response(),
+        Err(err) => return err.into_response(),
     };
 
     let format = path_format
@@ -50,14 +51,16 @@ pub async fn get_changeset_xml(State(state): State<AppState>, Path(id): Path<i64
                 Ok(xml) => ([(header::CONTENT_TYPE, "application/xml")], xml).into_response(),
                 Err(e) => {
                     tracing::error!("Formatting error: {}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    ApiError::internal_error("Failed to format changeset").into_response()
                 }
             }
         }
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => {
+            ApiError::not_found(format!("Changeset {} not found", id)).into_response()
+        }
         Err(e) => {
             tracing::error!("Query error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            ApiError::internal_error("Database query failed").into_response()
         }
     }
 }
@@ -71,19 +74,21 @@ pub async fn get_changeset_json(State(state): State<AppState>, Path(id): Path<i6
                 Ok(json) => ([(header::CONTENT_TYPE, "application/json")], json).into_response(),
                 Err(e) => {
                     tracing::error!("Formatting error: {}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    ApiError::internal_error("Failed to format changeset").into_response()
                 }
             }
         }
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => {
+            ApiError::not_found(format!("Changeset {} not found", id)).into_response()
+        }
         Err(e) => {
             tracing::error!("Query error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            ApiError::internal_error("Database query failed").into_response()
         }
     }
 }
 
-fn parse_id_and_format(raw: &str) -> Result<(i64, Option<String>), StatusCode> {
+fn parse_id_and_format(raw: &str) -> Result<(i64, Option<String>), ApiError> {
     let (id_part, format) = match raw.rsplit_once('.') {
         Some((id_part, ext)) if ext.eq_ignore_ascii_case("json") => {
             (id_part, Some("json".to_string()))
@@ -94,9 +99,12 @@ fn parse_id_and_format(raw: &str) -> Result<(i64, Option<String>), StatusCode> {
         _ => (raw, None),
     };
 
-    let id = id_part
-        .parse::<i64>()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let id = id_part.parse::<i64>().map_err(|_| {
+        ApiError::bad_request_with_details(
+            "Invalid changeset ID",
+            format!("'{}' is not a valid changeset ID", id_part),
+        )
+    })?;
     Ok((id, format))
 }
 

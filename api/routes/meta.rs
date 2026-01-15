@@ -69,7 +69,7 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 
     Json(HealthResponse {
         status: "ok".to_string(),
-        version: "0.1.0".to_string(),
+        version: "0.3.0".to_string(),
         uptime_seconds: state.started_at.elapsed().as_secs(),
         data_loaded,
         partition_count,

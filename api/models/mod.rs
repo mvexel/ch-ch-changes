@@ -3,7 +3,9 @@
 //! Contains the core data structures that represent changesets, metadata, and related entities.
 
 pub mod changeset;
+pub mod error;
 pub mod metadata;
 
 pub use changeset::Changeset;
+pub use error::ApiError;
 pub use metadata::Metadata;

@@ -107,7 +107,7 @@ impl Formatter for JsonFormatter {
     ) -> Result<String, Box<dyn std::error::Error>> {
         let response = SingleJsonResponse {
             version: "0.6".to_string(),
-            generator: "changeset-historic-api/0.1.0".to_string(),
+            generator: "changeset-historic-api/0.3.0".to_string(),
             copyright: "OpenStreetMap and contributors".to_string(),
             attribution: "http://www.openstreetmap.org/copyright".to_string(),
             license: "http://opendatacommons.org/licenses/odbl/1-0/".to_string(),
@@ -127,7 +127,7 @@ impl Formatter for JsonFormatter {
     ) -> Result<String, Box<dyn std::error::Error>> {
         let response = JsonResponse {
             version: "0.6".to_string(),
-            generator: "changeset-historic-api/0.1.0".to_string(),
+            generator: "changeset-historic-api/0.3.0".to_string(),
             copyright: "OpenStreetMap and contributors".to_string(),
             attribution: "http://www.openstreetmap.org/copyright".to_string(),
             license: "http://opendatacommons.org/licenses/odbl/1-0/".to_string(),

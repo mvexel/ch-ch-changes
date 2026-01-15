@@ -7,7 +7,7 @@ use crate::models::Changeset;
 use chrono::{SecondsFormat, TimeZone, Utc};
 use std::borrow::Cow;
 
-const OSM_ROOT_OPEN: &str = "<osm version=\"0.6\" generator=\"changeset-historic-api/0.1.0\" copyright=\"OpenStreetMap and contributors\" attribution=\"http://www.openstreetmap.org/copyright\" license=\"http://opendatacommons.org/licenses/odbl/1-0/\">\n";
+const OSM_ROOT_OPEN: &str = "<osm version=\"0.6\" generator=\"changeset-historic-api/0.3.0\" copyright=\"OpenStreetMap and contributors\" attribution=\"http://www.openstreetmap.org/copyright\" license=\"http://opendatacommons.org/licenses/odbl/1-0/\">\n";
 
 /// XML formatter for OSM changeset output
 pub struct XmlFormatter;

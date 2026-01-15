@@ -1,12 +1,12 @@
 //! Batch and range changeset route handlers
 
 use crate::format::{json::JsonFormatter, jsonl::JsonLinesFormatter, xml::XmlFormatter, Formatter};
-use crate::models::Changeset;
+use crate::models::{ApiError, Changeset};
 use crate::query::engine::QueryFilters;
 use crate::state::AppState;
 use axum::{
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::header,
     response::{IntoResponse, Response},
 };
 use chrono::{NaiveDate, TimeZone, Utc};
@@ -64,7 +64,7 @@ fn format_response(changesets: &[Changeset], format: Option<&str>, pretty: bool)
                 Ok(json) => ([(header::CONTENT_TYPE, "application/json")], json).into_response(),
                 Err(e) => {
                     tracing::error!("Formatting error: {}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    ApiError::internal_error("Failed to format response").into_response()
                 }
             }
         }
@@ -76,7 +76,7 @@ fn format_response(changesets: &[Changeset], format: Option<&str>, pretty: bool)
                 }
                 Err(e) => {
                     tracing::error!("Formatting error: {}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    ApiError::internal_error("Failed to format response").into_response()
                 }
             }
         }
@@ -86,7 +86,7 @@ fn format_response(changesets: &[Changeset], format: Option<&str>, pretty: bool)
                 Ok(xml) => ([(header::CONTENT_TYPE, "application/xml")], xml).into_response(),
                 Err(e) => {
                     tracing::error!("Formatting error: {}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    ApiError::internal_error("Failed to format response").into_response()
                 }
             }
         }
@@ -105,7 +105,13 @@ pub async fn get_changesets_by_day(
 
     let date = match NaiveDate::parse_from_str(date_str, "%Y%m%d") {
         Ok(d) => d,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        Err(_) => {
+            return ApiError::bad_request_with_details(
+                "Invalid date format",
+                format!("'{}' is not a valid date. Expected format: YYYYMMDD", date_str),
+            )
+            .into_response()
+        }
     };
 
     let start = Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap());
@@ -119,7 +125,7 @@ pub async fn get_changesets_by_day(
         Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
         Err(e) => {
             tracing::error!("Query error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            ApiError::internal_error("Database query failed").into_response()
         }
     }
 }
@@ -136,12 +142,24 @@ pub async fn get_changesets_by_id_range(
 
     let start_id = match start_str.parse::<i64>() {
         Ok(id) => id,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        Err(_) => {
+            return ApiError::bad_request_with_details(
+                "Invalid start ID",
+                format!("'{}' is not a valid changeset ID", start_str),
+            )
+            .into_response()
+        }
     };
 
     let end_id = match end_str.parse::<i64>() {
         Ok(id) => id,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        Err(_) => {
+            return ApiError::bad_request_with_details(
+                "Invalid end ID",
+                format!("'{}' is not a valid changeset ID", end_str),
+            )
+            .into_response()
+        }
     };
 
     match state
@@ -151,7 +169,7 @@ pub async fn get_changesets_by_id_range(
         Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
         Err(e) => {
             tracing::error!("Query error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            ApiError::internal_error("Database query failed").into_response()
         }
     }
 }
@@ -168,12 +186,24 @@ pub async fn get_changesets_by_date_range(
 
     let start_date = match NaiveDate::parse_from_str(&start_str, "%Y%m%d") {
         Ok(d) => Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0).unwrap()),
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        Err(_) => {
+            return ApiError::bad_request_with_details(
+                "Invalid start date format",
+                format!("'{}' is not a valid date. Expected format: YYYYMMDD", start_str),
+            )
+            .into_response()
+        }
     };
 
     let end_date = match NaiveDate::parse_from_str(&end_str, "%Y%m%d") {
         Ok(d) => Utc.from_utc_datetime(&d.and_hms_opt(23, 59, 59).unwrap()),
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        Err(_) => {
+            return ApiError::bad_request_with_details(
+                "Invalid end date format",
+                format!("'{}' is not a valid date. Expected format: YYYYMMDD", end_str),
+            )
+            .into_response()
+        }
     };
 
     match state.engine.get_changesets_by_date_range(
@@ -184,7 +214,7 @@ pub async fn get_changesets_by_date_range(
         Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
         Err(e) => {
             tracing::error!("Query error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            ApiError::internal_error("Database query failed").into_response()
         }
     }
 }
@@ -201,21 +231,33 @@ pub async fn get_changesets_by_hour(
 
     let date = match NaiveDate::parse_from_str(&date_str, "%Y%m%d") {
         Ok(d) => d,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        Err(_) => {
+            return ApiError::bad_request_with_details(
+                "Invalid date format",
+                format!("'{}' is not a valid date. Expected format: YYYYMMDD", date_str),
+            )
+            .into_response()
+        }
     };
 
     let hour = match hour_str.parse::<u32>() {
         Ok(h) if h < 24 => h,
-        _ => return StatusCode::BAD_REQUEST.into_response(),
+        _ => {
+            return ApiError::bad_request_with_details(
+                "Invalid hour",
+                format!("'{}' is not a valid hour. Must be 0-23", hour_str),
+            )
+            .into_response()
+        }
     };
 
     let start_naive = match date.and_hms_opt(hour, 0, 0) {
         Some(dt) => dt,
-        None => return StatusCode::BAD_REQUEST.into_response(),
+        None => return ApiError::internal_error("Failed to construct timestamp").into_response(),
     };
     let end_naive = match date.and_hms_opt(hour, 59, 59) {
         Some(dt) => dt,
-        None => return StatusCode::BAD_REQUEST.into_response(),
+        None => return ApiError::internal_error("Failed to construct timestamp").into_response(),
     };
 
     let start = Utc.from_utc_datetime(&start_naive);
@@ -229,7 +271,7 @@ pub async fn get_changesets_by_hour(
         Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
         Err(e) => {
             tracing::error!("Query error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            ApiError::internal_error("Database query failed").into_response()
         }
     }
 }
@@ -246,26 +288,44 @@ pub async fn get_changesets_by_minute(
 
     let date = match NaiveDate::parse_from_str(&date_str, "%Y%m%d") {
         Ok(d) => d,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        Err(_) => {
+            return ApiError::bad_request_with_details(
+                "Invalid date format",
+                format!("'{}' is not a valid date. Expected format: YYYYMMDD", date_str),
+            )
+            .into_response()
+        }
     };
 
     let hour = match hour_str.parse::<u32>() {
         Ok(h) if h < 24 => h,
-        _ => return StatusCode::BAD_REQUEST.into_response(),
+        _ => {
+            return ApiError::bad_request_with_details(
+                "Invalid hour",
+                format!("'{}' is not a valid hour. Must be 0-23", hour_str),
+            )
+            .into_response()
+        }
     };
 
     let minute = match minute_str.parse::<u32>() {
         Ok(m) if m < 60 => m,
-        _ => return StatusCode::BAD_REQUEST.into_response(),
+        _ => {
+            return ApiError::bad_request_with_details(
+                "Invalid minute",
+                format!("'{}' is not a valid minute. Must be 0-59", minute_str),
+            )
+            .into_response()
+        }
     };
 
     let start_naive = match date.and_hms_opt(hour, minute, 0) {
         Some(dt) => dt,
-        None => return StatusCode::BAD_REQUEST.into_response(),
+        None => return ApiError::internal_error("Failed to construct timestamp").into_response(),
     };
     let end_naive = match date.and_hms_opt(hour, minute, 59) {
         Some(dt) => dt,
-        None => return StatusCode::BAD_REQUEST.into_response(),
+        None => return ApiError::internal_error("Failed to construct timestamp").into_response(),
     };
 
     let start = Utc.from_utc_datetime(&start_naive);
@@ -279,7 +339,7 @@ pub async fn get_changesets_by_minute(
         Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
         Err(e) => {
             tracing::error!("Query error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            ApiError::internal_error("Database query failed").into_response()
         }
     }
 }
