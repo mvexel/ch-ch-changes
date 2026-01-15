@@ -298,11 +298,24 @@ sudo systemctl restart systemd-journald
 
 ## Scheduled Updates
 
-To keep your data fresh, schedule regular updates:
+To keep your data fresh, schedule regular updates using the `update-data.sh` script. This script:
+- Downloads the latest OSM changeset dump
+- Processes it to parquet format
+- Performs a zero-downtime atomic swap of the data
+- Restarts the service
+- Validates everything works
 
-### Option 1: Local Processing (VPS)
+### Option 1: Using Cron (Simple)
 
-Use systemd timers for scheduled processing on your VPS:
+```bash
+# Edit root's crontab
+sudo crontab -e
+
+# Add weekly update on Sundays at 3 AM
+0 3 * * 0 /root/changesets-to-parquet/scripts/update-data.sh >> /var/log/changeset-update.log 2>&1
+```
+
+### Option 2: Using systemd Timers (More robust)
 
 ```bash
 # Create service file
@@ -314,8 +327,10 @@ After=network.target
 [Service]
 Type=oneshot
 User=root
-WorkingDirectory=/tmp
-ExecStart=/opt/changeset-server/update-data.sh
+WorkingDirectory=/root/changesets-to-parquet
+ExecStart=/root/changesets-to-parquet/scripts/update-data.sh
+StandardOutput=append:/var/log/changeset-update.log
+StandardError=append:/var/log/changeset-update.log
 TimeoutStartSec=6h
 EOF
 
@@ -339,9 +354,12 @@ sudo systemctl start changeset-update.timer
 
 # Verify
 systemctl list-timers | grep changeset
+
+# View logs
+journalctl -u changeset-update.service
 ```
 
-### Option 2: Hetzner Cloud Processing (Recommended)
+### Option 3: Hetzner Cloud Processing (Alternative)
 
 Use cron to trigger Hetzner Cloud processing:
 
