@@ -18,7 +18,11 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::PathBuf;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
+use std::thread;
+
+const CHANNEL_BATCH_SIZE: usize = 1000;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -673,7 +677,7 @@ fn parse_changeset_body<R: std::io::BufRead>(
                     "Unexpected EOF while parsing changeset body"
                 ))
             }
-            Ok(_) => {}
+            Ok(_) => {} // Ignore other events
             Err(err) => return Err(err.into()),
         }
         buf.clear();
@@ -682,13 +686,12 @@ fn parse_changeset_body<R: std::io::BufRead>(
     Ok(())
 }
 
-fn parse_and_write_changesets<R: std::io::Read>(
+/// Producer: Parses XML and sends batches of changesets to the channel
+fn parse_xml_to_channel<R: std::io::Read + Send + 'static>(
     reader: R,
-    writer: &mut ArrowWriter<File>,
-    schema: &Arc<Schema>,
-    batch_size: usize,
+    tx: SyncSender<Result<Vec<Changeset>>>, 
     continue_on_error: bool,
-) -> Result<usize> {
+) {
     // Use a large buffer (1MB) to avoid splitting XML tags across read boundaries
     let buffered_reader = BufReader::with_capacity(1024 * 1024, reader);
     let mut xml_reader = Reader::from_reader(buffered_reader);
@@ -698,46 +701,65 @@ fn parse_and_write_changesets<R: std::io::Read>(
     xml_reader.config_mut().check_comments = false; // Don't validate comments
 
     let mut buf = Vec::new();
-    let mut count = 0;
-    let mut batch_num = 0;
-    let mut last_changeset_id = 0i64;
-
     let mut temp_buf = Vec::new();
-    let effective_batch_size = batch_size.max(1);
-    let mut builders = BatchBuilders::with_capacity(effective_batch_size);
+    let mut last_changeset_id = 0i64;
+    let mut count = 0;
 
-    let mut process_changeset = |changeset: Changeset| -> Result<()> {
-        last_changeset_id = changeset.id;
-        builders.append(&changeset);
-        count += 1;
-
-        if builders.len() >= effective_batch_size {
-            batch_num += 1;
-            let batch = builders.finish_batch(schema)?;
-            let rows = batch.num_rows();
-            println!(
-                "Writing batch {} with {} rows (total: {})...",
-                batch_num, rows, count
-            );
-            writer.write(&batch)?;
-        }
-
-        Ok(())
-    };
+    let mut batch = Vec::with_capacity(CHANNEL_BATCH_SIZE);
 
     loop {
         let position = xml_reader.buffer_position();
         match xml_reader.read_event_into(&mut buf) {
             Ok(Event::Empty(ref e)) if e.name().as_ref() == b"changeset" => {
-                let changeset = parse_changeset_element(e)?;
-                process_changeset(changeset)?;
+                match parse_changeset_element(e) {
+                    Ok(changeset) => {
+                        last_changeset_id = changeset.id;
+                        batch.push(changeset);
+                        count += 1;
+                    }
+                    Err(e) => {
+                        if !continue_on_error {
+                            let _ = tx.send(Err(e));
+                            return;
+                        } else {
+                            eprintln!("Error parsing changeset element at pos {}: {}", position, e);
+                        }
+                    }
+                }
             }
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"changeset" => {
-                let mut changeset = parse_changeset_element(e)?;
-                temp_buf.clear();
-                parse_changeset_body(&mut xml_reader, &mut changeset, &mut temp_buf)?;
-                temp_buf.clear();
-                process_changeset(changeset)?;
+                match parse_changeset_element(e) {
+                    Ok(mut changeset) => {
+                        temp_buf.clear();
+                        match parse_changeset_body(&mut xml_reader, &mut changeset, &mut temp_buf) {
+                            Ok(_) => {
+                                last_changeset_id = changeset.id;
+                                batch.push(changeset);
+                                count += 1;
+                            }
+                            Err(e) => {
+                                if !continue_on_error {
+                                    let _ = tx.send(Err(e));
+                                    return;
+                                } else {
+                                    eprintln!(
+                                        "Error parsing changeset body for ID {}: {}",
+                                        changeset.id, e
+                                    );
+                                }
+                            }
+                        }
+                        temp_buf.clear();
+                    }
+                    Err(e) => {
+                        if !continue_on_error {
+                            let _ = tx.send(Err(e));
+                            return;
+                        } else {
+                            eprintln!("Error parsing changeset element at pos {}: {}", position, e);
+                        }
+                    }
+                }
             }
             Ok(Event::Eof) => break,
             Err(e) => {
@@ -760,15 +782,61 @@ fn parse_and_write_changesets<R: std::io::Read>(
                     );
                     break;
                 } else {
-                    return Err(anyhow::anyhow!(
+                    let _ = tx.send(Err(anyhow::anyhow!(
                         "Error parsing XML: {}. Use --continue-on-error to save partial results.",
                         e
-                    ));
+                    )));
+                    return;
                 }
             }
-            _ => {}
+            _ => {} // Ignore other events
         }
         buf.clear();
+
+        if batch.len() >= CHANNEL_BATCH_SIZE {
+            if tx.send(Ok(batch)).is_err() {
+                // Receiver disconnected
+                return;
+            }
+            batch = Vec::with_capacity(CHANNEL_BATCH_SIZE);
+        }
+    }
+
+    if !batch.is_empty() {
+        let _ = tx.send(Ok(batch));
+    }
+}
+
+/// Consumer: Writes flat parquet file
+fn consume_and_write_flat(
+    rx: Receiver<Result<Vec<Changeset>>>, 
+    writer: &mut ArrowWriter<File>,
+    schema: &Arc<Schema>,
+    batch_size: usize,
+) -> Result<usize> {
+    let mut count = 0;
+    let mut batch_num = 0;
+    
+    let effective_batch_size = batch_size.max(1);
+    let mut builders = BatchBuilders::with_capacity(effective_batch_size);
+
+    for batch_result in rx {
+        let batch = batch_result?;
+        for cs in batch {
+            builders.append(&cs);
+            count += 1;
+
+            if builders.len() >= effective_batch_size {
+                batch_num += 1;
+                let batch = builders.finish_batch(schema)?;
+                let rows = batch.num_rows();
+                println!(
+                    "Writing batch {} with {} rows (total: {})...",
+                    batch_num, rows, count
+                );
+                writer.write(&batch)?;
+            }
+        }
     }
 
     // Process remaining changesets
@@ -786,87 +854,28 @@ fn parse_and_write_changesets<R: std::io::Read>(
     Ok(count)
 }
 
-/// Parse and write changesets to partitioned output
-fn parse_and_write_partitioned<R: std::io::Read>(
-    reader: R,
+/// Consumer: Writes partitioned parquet files
+fn consume_and_write_partitioned(
+    rx: Receiver<Result<Vec<Changeset>>>, 
     partitioned_writer: &mut PartitionedWriter,
     mut index_collector: Option<&mut IndexCollector>,
-    continue_on_error: bool,
 ) -> Result<usize> {
-    let buffered_reader = BufReader::with_capacity(1024 * 1024, reader);
-    let mut xml_reader = Reader::from_reader(buffered_reader);
-    xml_reader.config_mut().trim_text_start = true;
-    xml_reader.config_mut().trim_text_end = true;
-    xml_reader.config_mut().check_end_names = false;
-    xml_reader.config_mut().check_comments = false;
-
-    let mut buf = Vec::new();
-    let mut temp_buf = Vec::new();
     let mut count = 0;
-    let mut last_changeset_id = 0i64;
 
-    loop {
-        let position = xml_reader.buffer_position();
-        match xml_reader.read_event_into(&mut buf) {
-            Ok(Event::Empty(ref e)) if e.name().as_ref() == b"changeset" => {
-                let changeset = parse_changeset_element(e)?;
-                last_changeset_id = changeset.id;
-
-                if let Some(ref mut collector) = index_collector.as_deref_mut() {
-                    collector.record(&changeset);
-                }
-
-                partitioned_writer.write_changeset(&changeset)?;
-                count += 1;
-
-                if count % 1_000_000 == 0 {
-                    println!("Processed {} changesets...", count);
-                }
+    for batch_result in rx {
+        let batch = batch_result?;
+        for cs in batch {
+            if let Some(ref mut collector) = index_collector.as_deref_mut() {
+                collector.record(&cs);
             }
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"changeset" => {
-                let mut changeset = parse_changeset_element(e)?;
-                temp_buf.clear();
-                parse_changeset_body(&mut xml_reader, &mut changeset, &mut temp_buf)?;
-                temp_buf.clear();
 
-                last_changeset_id = changeset.id;
+            partitioned_writer.write_changeset(&cs)?;
+            count += 1;
 
-                if let Some(ref mut collector) = index_collector.as_deref_mut() {
-                    collector.record(&changeset);
-                }
-
-                partitioned_writer.write_changeset(&changeset)?;
-                count += 1;
-
-                if count % 1_000_000 == 0 {
-                    println!("Processed {} changesets...", count);
-                }
+            if count % 1_000_000 == 0 {
+                println!("Processed {} changesets...", count);
             }
-            Ok(Event::Eof) => break,
-            Err(e) => {
-                eprintln!("\n=== XML PARSE ERROR ===");
-                eprintln!("Position: {}", position);
-                eprintln!("Changesets processed: {}", count);
-                eprintln!("Last changeset ID: {}", last_changeset_id);
-                eprintln!("Error: {}", e);
-                eprintln!("======================\n");
-
-                if continue_on_error {
-                    eprintln!(
-                        "Continuing with {} successfully parsed changesets...",
-                        count
-                    );
-                    break;
-                } else {
-                    return Err(anyhow::anyhow!(
-                        "Error parsing XML: {}. Use --continue-on-error to save partial results.",
-                        e
-                    ));
-                }
-            }
-            _ => {}
         }
-        buf.clear();
     }
 
     Ok(count)
@@ -900,7 +909,7 @@ fn create_schema() -> Arc<Schema> {
             DataType::Map(
                 Arc::new(Field::new(
                     "entries",
-                    DataType::Struct(Fields::from(vec![
+                    DataType::Struct(Fields::from(vec![ 
                         Field::new("keys", DataType::Utf8, false),
                         Field::new("values", DataType::Utf8, true),
                     ])),
@@ -937,6 +946,21 @@ fn main() -> Result<()> {
     let file = File::open(&args.input)
         .with_context(|| format!("Failed to open input file: {}", args.input))?;
 
+    let (tx, rx) = sync_channel(32);
+    let continue_on_error = args.continue_on_error;
+    let input_is_bz2 = args.input.ends_with(".bz2");
+
+    // Spawn producer thread
+    let parser_handle = thread::spawn(move || {
+        if input_is_bz2 {
+            println!("Detected bzip2 multi-stream compressed file");
+            let decoder = MultiBzDecoder::new(file);
+            parse_xml_to_channel(decoder, tx, continue_on_error);
+        } else {
+            parse_xml_to_channel(file, tx, continue_on_error);
+        }
+    });
+
     if args.partition {
         // Partitioned output mode
         let output_dir = PathBuf::from(args.output_dir.as_ref().unwrap());
@@ -952,23 +976,11 @@ fn main() -> Result<()> {
             None
         };
 
-        let total_count = if args.input.ends_with(".bz2") {
-            println!("Detected bzip2 multi-stream compressed file");
-            let decoder = MultiBzDecoder::new(file);
-            parse_and_write_partitioned(
-                decoder,
-                &mut partitioned_writer,
-                index_collector.as_mut(),
-                args.continue_on_error,
-            )?
-        } else {
-            parse_and_write_partitioned(
-                file,
-                &mut partitioned_writer,
-                index_collector.as_mut(),
-                args.continue_on_error,
-            )?
-        };
+        let total_count = consume_and_write_partitioned(
+            rx,
+            &mut partitioned_writer,
+            index_collector.as_mut(),
+        )?;
 
         println!("\nFinalizing partitions...");
         let PartitionSummary {
@@ -1004,25 +1016,7 @@ fn main() -> Result<()> {
 
         let mut writer = ArrowWriter::try_new(output_file, schema.clone(), Some(props))?;
 
-        let total_count = if args.input.ends_with(".bz2") {
-            println!("Detected bzip2 multi-stream compressed file");
-            let decoder = MultiBzDecoder::new(file);
-            parse_and_write_changesets(
-                decoder,
-                &mut writer,
-                &schema,
-                args.batch_size,
-                args.continue_on_error,
-            )?
-        } else {
-            parse_and_write_changesets(
-                file,
-                &mut writer,
-                &schema,
-                args.batch_size,
-                args.continue_on_error,
-            )?
-        };
+        let total_count = consume_and_write_flat(rx, &mut writer, &schema, args.batch_size)?;
 
         writer.close()?;
 
@@ -1032,6 +1026,8 @@ fn main() -> Result<()> {
         );
     }
 
+    parser_handle.join().unwrap();
+
     Ok(())
 }
 
@@ -1040,7 +1036,7 @@ fn write_partition_stats_index(
     stats: &HashMap<PartitionKey, PartitionStats>,
 ) -> Result<()> {
     if stats.is_empty() {
-        return Ok(());
+        return Ok(())
     }
 
     let indexes_dir = output_dir.join("indexes");
