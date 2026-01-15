@@ -175,7 +175,7 @@ fi
 log "[4/7] Waiting for SSH to be ready..."
 SSH_READY=false
 for i in {1..60}; do
-    if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes \
+    if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes \
         root@$SERVER_IP "echo ready" &>/dev/null; then
         SSH_READY=true
         log "SSH is ready!"
@@ -195,7 +195,7 @@ fi
 # Wait for cloud-init to complete
 log "Waiting for cloud-init to complete..."
 for i in {1..60}; do
-    CLOUD_INIT_STATUS=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$SERVER_IP \
+    CLOUD_INIT_STATUS=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@$SERVER_IP \
         "cloud-init status" 2>/dev/null | awk '/status:/ {print $2}' || echo "unknown")
 
     if [ "$CLOUD_INIT_STATUS" = "done" ]; then
@@ -216,7 +216,7 @@ done
 log "[5/7] Copying source code to server..."
 PROCESSING_FAILED=false
 if ! rsync -az --progress \
-    -e "ssh -o StrictHostKeyChecking=no" \
+    -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
     --exclude '.git' \
     --exclude 'target' \
     --exclude '_local' \
@@ -230,10 +230,10 @@ fi
 if [ "$PROCESSING_FAILED" != true ]; then
     log "[6/7] Building Docker image on server..."
     if [ "$FOLLOW_LOGS" = true ]; then
-        ssh -o StrictHostKeyChecking=no root@$SERVER_IP \
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
             "cd /app && docker build -f Dockerfile.builder -t changeset-builder:latest ." | tee -a "$LOG_FILE"
     else
-        ssh -o StrictHostKeyChecking=no root@$SERVER_IP \
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
             "cd /app && docker build -f Dockerfile.builder -t changeset-builder:latest . >> /var/log/build.log 2>&1"
     fi
 
@@ -248,14 +248,14 @@ if [ "$PROCESSING_FAILED" != true ]; then
     log "[7/7] Starting processing..."
 
     # Start the processing container in background
-    ssh -o StrictHostKeyChecking=no root@$SERVER_IP \
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
         "docker run --rm -v /data:/data changeset-builder:latest > /tmp/processing.log 2>&1 && touch /tmp/processing-complete" &
 
     # Start log tailing if requested
     if [ "$FOLLOW_LOGS" = true ]; then
         log "Streaming logs..."
         sleep 5
-        ssh -o StrictHostKeyChecking=no root@$SERVER_IP \
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
             "tail -f /tmp/processing.log 2>/dev/null || echo 'Waiting for logs...'; sleep infinity" &
         LOG_TAIL_PID=$!
     fi
@@ -265,7 +265,7 @@ fi
 START_TIME=$(date +%s)
 
 while [ "$PROCESSING_FAILED" != true ]; do
-    if ssh -o StrictHostKeyChecking=no root@$SERVER_IP "test -f /tmp/processing-complete" 2>/dev/null; then
+    if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP "test -f /tmp/processing-complete" 2>/dev/null; then
         DURATION=$(($(date +%s) - START_TIME))
         log "Processing complete! Duration: $((DURATION / 60)) minutes"
         break
@@ -298,7 +298,7 @@ fi
 # Handle failure
 if [ "$PROCESSING_FAILED" = true ]; then
     log "Fetching logs for debugging..."
-    ssh -o StrictHostKeyChecking=no root@$SERVER_IP \
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
         "cat /var/log/build.log /tmp/processing.log 2>/dev/null" >> "$LOG_FILE" 2>&1 || true
 
     if [ "$KEEP_ON_FAILURE" = true ]; then
@@ -319,7 +319,7 @@ fi
 log "[8/8] Syncing data back to local server..."
 mkdir -p "$DEST_DATA_DIR"
 if rsync -avz --progress \
-    -e "ssh -o StrictHostKeyChecking=no" \
+    -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
     root@$SERVER_IP:/data/changesets/ \
     "$DEST_DATA_DIR/" >> "$LOG_FILE" 2>&1; then
     log "Data synced successfully!"
