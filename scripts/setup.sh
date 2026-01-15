@@ -35,10 +35,11 @@ fi
 echo -e "\n${YELLOW}[2/8] Creating directory structure...${NC}"
 mkdir -p "$DEPLOY_DIR"/{bin,releases,shared}
 mkdir -p "$DATA_DIR"
+mkdir -p /var/lib/changeset-server
 echo -e "${GREEN}✓ Created directories${NC}"
 
 echo -e "\n${YELLOW}[3/8] Setting permissions...${NC}"
-chown -R "$SERVICE_USER:$SERVICE_USER" "$DEPLOY_DIR" "$DATA_DIR"
+chown -R "$SERVICE_USER:$SERVICE_USER" "$DEPLOY_DIR" "$DATA_DIR" /var/lib/changeset-server
 echo -e "${GREEN}✓ Set ownership to $SERVICE_USER${NC}"
 
 echo -e "\n${YELLOW}[4/8] Installing systemd service...${NC}"

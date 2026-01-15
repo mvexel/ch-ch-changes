@@ -13,6 +13,7 @@ WorkingDirectory=/opt/changeset-server
 # Environment variables
 Environment="DATA_PATH=/data/parquet"
 Environment="RUST_LOG=info"
+Environment="HOME=/var/lib/changeset-server"
 
 # Binary location
 ExecStart=/opt/changeset-server/bin/changeset-server
@@ -26,7 +27,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/data/parquet
+ReadWritePaths=/data/parquet /var/lib/changeset-server
 
 # Resource limits
 LimitNOFILE=65536
