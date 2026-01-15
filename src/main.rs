@@ -41,7 +41,7 @@ struct Args {
     generate_indexes: bool,
 
     /// Batch size for writing records
-    #[arg(short, long, default_value_t = 100000)]
+    #[arg(long, default_value_t = 10000, hide = true)]
     batch_size: usize,
 
     /// Continue processing on parse errors (saves what was successfully parsed)
@@ -49,7 +49,7 @@ struct Args {
     continue_on_error: bool,
 
     /// Number of worker threads for parallel writing (default: 1)
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, hide = true)]
     workers: usize,
 }
 
