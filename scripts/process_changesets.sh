@@ -64,22 +64,42 @@ log_info "Output directory: $TEMP_OUTPUT_DIR"
 
 START_TIME=$(date +%s)
 
+# Detect CPU cores for parallelism
+CORES=$(nproc)
+# Reserve one core for decompression/parsing
+WORKERS=$((CORES > 1 ? CORES - 1 : 1))
+log_info "Using $WORKERS worker threads (detected $CORES cores)"
+
+# Construct command
+# We pipe pbzip2 output directly to the tool for maximum performance
 PROCESS_CMD=(changesets-to-parquet \
-    --input "$DOWNLOAD_DIR/$CHANGESET_FILE" \
+    --input - \
     --output-dir "$TEMP_OUTPUT_DIR" \
     --partition \
     --generate-indexes \
-    --batch-size 100000)
+    --batch-size 100000 \
+    --workers "$WORKERS")
 
 # Force line-buffered output so remote log tailing stays responsive.
 if command -v stdbuf >/dev/null 2>&1; then
     PROCESS_CMD=(stdbuf -oL -eL "${PROCESS_CMD[@]}")
 fi
 
-"${PROCESS_CMD[@]}" || {
-    log_error "Parquet conversion failed"
-    exit 1
-}
+# Run pipeline: pbzip2 -> changesets-to-parquet
+if command -v pbzip2 >/dev/null 2>&1; then
+    log_info "Using pbzip2 for parallel decompression"
+    pbzip2 -dc "$DOWNLOAD_DIR/$CHANGESET_FILE" | "${PROCESS_CMD[@]}" || {
+        log_error "Parquet conversion failed"
+        exit 1
+    }
+else
+    log_info "pbzip2 not found, falling back to standard input piping"
+    # Fallback if pbzip2 is missing (though it should be in the image)
+    cat "$DOWNLOAD_DIR/$CHANGESET_FILE" | "${PROCESS_CMD[@]}" || {
+        log_error "Parquet conversion failed"
+        exit 1
+    }
+fi
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))

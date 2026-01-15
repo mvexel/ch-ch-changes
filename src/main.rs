@@ -16,7 +16,7 @@ use quick_xml::name::QName;
 use quick_xml::Reader;
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
@@ -27,7 +27,7 @@ const CHANNEL_BATCH_SIZE: usize = 1000;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Input OSM changeset XML file (.osm or .osm.bz2)
+    /// Input OSM changeset XML file (.osm or .osm.bz2). Use "-" for stdin.
     #[arg(short, long)]
     input: String,
 
@@ -54,6 +54,10 @@ struct Args {
     /// Continue processing on parse errors (saves what was successfully parsed)
     #[arg(long, default_value_t = false)]
     continue_on_error: bool,
+
+    /// Number of worker threads for parallel writing (default: 1)
+    #[arg(long, default_value_t = 1)]
+    workers: usize,
 }
 
 struct BatchBuilders {
@@ -228,7 +232,11 @@ impl PartitionKey {
         }
     }
 
-    fn path(&self) -> String {
+    fn dir_path(&self) -> String {
+        format!("year={}/month={:02}", self.year, self.month)
+    }
+
+    fn legacy_file_path(&self) -> String {
         format!("year={}/month={:02}.parquet", self.year, self.month)
     }
 }
@@ -241,6 +249,8 @@ struct PartitionedWriter {
     schema: Arc<Schema>,
     props: WriterProperties,
     batch_size: usize,
+    shard_id: usize,
+    use_sharding: bool,
     writers: HashMap<PartitionKey, ArrowWriter<File>>,
     builders: HashMap<PartitionKey, BatchBuilders>,
     partition_counts: HashMap<PartitionKey, usize>,
@@ -248,7 +258,13 @@ struct PartitionedWriter {
 }
 
 impl PartitionedWriter {
-    fn new(output_dir: PathBuf, schema: Arc<Schema>, batch_size: usize) -> Result<Self> {
+    fn new(
+        output_dir: PathBuf,
+        schema: Arc<Schema>,
+        batch_size: usize,
+        shard_id: usize,
+        use_sharding: bool,
+    ) -> Result<Self> {
         // Create output directory structure
         fs::create_dir_all(&output_dir)
             .with_context(|| format!("Failed to create output directory: {:?}", output_dir))?;
@@ -262,6 +278,8 @@ impl PartitionedWriter {
             schema,
             props,
             batch_size,
+            shard_id,
+            use_sharding,
             writers: HashMap::new(),
             builders: HashMap::new(),
             partition_counts: HashMap::new(),
@@ -271,11 +289,19 @@ impl PartitionedWriter {
 
     fn get_or_create_writer(&mut self, key: &PartitionKey) -> Result<()> {
         if !self.writers.contains_key(key) {
-            // Create directory for this partition
-            let partition_dir = self.output_dir.join(format!("year={}", key.year));
-            fs::create_dir_all(&partition_dir)?;
-
-            let file_path = self.output_dir.join(key.path());
+            let file_path = if self.use_sharding {
+                // New directory structure: year=Y/month=M/part-{shard}.parquet
+                let partition_dir = self.output_dir.join(key.dir_path());
+                fs::create_dir_all(&partition_dir)?;
+                partition_dir.join(format!("part-{:05}.parquet", self.shard_id))
+            } else {
+                // Legacy structure: year=Y/month=M.parquet
+                // Only safe if single threaded, but we support single thread worker without sharding enabled.
+                let partition_dir = self.output_dir.join(format!("year={}", key.year));
+                fs::create_dir_all(&partition_dir)?;
+                self.output_dir.join(key.legacy_file_path())
+            };
+            
             let file = File::create(&file_path)
                 .with_context(|| format!("Failed to create partition file: {:?}", file_path))?;
 
@@ -329,11 +355,14 @@ impl PartitionedWriter {
         // Close all writers
         for (key, writer) in self.writers.drain() {
             writer.close()?;
-            println!(
-                "  Partition {}: {} changesets",
-                key.path(),
-                self.partition_counts.get(&key).unwrap_or(&0)
-            );
+            if !self.use_sharding || self.shard_id == 0 {
+                 println!(
+                    "  [Shard {}] Partition {}: {} changesets",
+                    self.shard_id,
+                    key.dir_path(),
+                    self.partition_counts.get(&key).unwrap_or(&0)
+                );
+            }
         }
 
         Ok(PartitionSummary {
@@ -392,11 +421,41 @@ impl PartitionStats {
             };
         }
     }
+
+    fn merge(&mut self, other: &PartitionStats) {
+        self.changeset_count += other.changeset_count;
+        self.min_id = self.min_id.min(other.min_id);
+        self.max_id = self.max_id.max(other.max_id);
+        
+        if let Some(ts) = other.min_timestamp {
+            self.min_timestamp = match self.min_timestamp {
+                Some(current) => Some(current.min(ts)),
+                None => Some(ts),
+            };
+        }
+        if let Some(ts) = other.max_timestamp {
+            self.max_timestamp = match self.max_timestamp {
+                Some(current) => Some(current.max(ts)),
+                None => Some(ts),
+            };
+        }
+    }
 }
 
 struct PartitionSummary {
     counts: HashMap<PartitionKey, usize>,
     stats: HashMap<PartitionKey, PartitionStats>,
+}
+
+impl PartitionSummary {
+    fn merge(&mut self, other: PartitionSummary) {
+        for (key, count) in other.counts {
+            *self.counts.entry(key.clone()).or_insert(0) += count;
+        }
+        for (key, stats) in other.stats {
+            self.stats.entry(key).or_default().merge(&stats);
+        }
+    }
 }
 
 /// Tracks user statistics for index generation
@@ -689,7 +748,7 @@ fn parse_changeset_body<R: std::io::BufRead>(
 /// Producer: Parses XML and sends batches of changesets to the channel
 fn parse_xml_to_channel<R: std::io::Read + Send + 'static>(
     reader: R,
-    tx: SyncSender<Result<Vec<Changeset>>>, 
+    tx: SyncSender<Result<Vec<Changeset>>>,
     continue_on_error: bool,
 ) {
     // Use a large buffer (1MB) to avoid splitting XML tags across read boundaries
@@ -809,7 +868,7 @@ fn parse_xml_to_channel<R: std::io::Read + Send + 'static>(
 
 /// Consumer: Writes flat parquet file
 fn consume_and_write_flat(
-    rx: Receiver<Result<Vec<Changeset>>>, 
+    rx: Receiver<Result<Vec<Changeset>>>,
     writer: &mut ArrowWriter<File>,
     schema: &Arc<Schema>,
     batch_size: usize,
@@ -854,31 +913,160 @@ fn consume_and_write_flat(
     Ok(count)
 }
 
-/// Consumer: Writes partitioned parquet files
-fn consume_and_write_partitioned(
-    rx: Receiver<Result<Vec<Changeset>>>, 
-    partitioned_writer: &mut PartitionedWriter,
+/// Consumer: Writes partitioned parquet files (single or multi-threaded)
+fn consume_and_write_partitioned_parallel(
+    rx: Receiver<Result<Vec<Changeset>>>,
+    output_dir: PathBuf,
+    schema: Arc<Schema>,
+    batch_size: usize,
+    num_workers: usize,
     mut index_collector: Option<&mut IndexCollector>,
-) -> Result<usize> {
-    let mut count = 0;
+) -> Result<(usize, PartitionSummary)> {
+    
+    if num_workers <= 1 {
+        // Single threaded mode (legacy behavior compatible)
+        let mut partitioned_writer = PartitionedWriter::new(
+            output_dir,
+            schema,
+            batch_size,
+            0,
+            false // No sharding in file names for single worker
+        )?;
+        
+        let mut count = 0;
+        for batch_result in rx {
+            let batch = batch_result?;
+            for cs in batch {
+                if let Some(ref mut collector) = index_collector.as_deref_mut() {
+                    collector.record(&cs);
+                }
+                partitioned_writer.write_changeset(&cs)?;
+                count += 1;
 
-    for batch_result in rx {
-        let batch = batch_result?;
-        for cs in batch {
-            if let Some(ref mut collector) = index_collector.as_deref_mut() {
-                collector.record(&cs);
+                if count % 1_000_000 == 0 {
+                    println!("Processed {} changesets...", count);
+                }
             }
+        }
+        
+        let summary = partitioned_writer.finish()?;
+        return Ok((count, summary));
+    }
+    
+    // Multi-threaded mode
+    let mut worker_senders = Vec::with_capacity(num_workers);
+    let mut worker_handles = Vec::with_capacity(num_workers);
 
-            partitioned_writer.write_changeset(&cs)?;
-            count += 1;
+    for i in 0..num_workers {
+        let (tx, worker_rx) = sync_channel::<Vec<Changeset>>(32);
+        worker_senders.push(tx);
+        
+        let worker_output_dir = output_dir.clone();
+        let worker_schema = schema.clone();
+        
+        let handle = thread::spawn(move || -> Result<PartitionSummary> {
+            let mut writer = PartitionedWriter::new(
+                worker_output_dir, 
+                worker_schema, 
+                batch_size, 
+                i,
+                true // Use sharding
+            )?;
+            
+            for batch in worker_rx {
+                for cs in batch {
+                    writer.write_changeset(&cs)?;
+                }
+            }
+            
+            writer.finish()
+        });
+        
+        worker_handles.push(handle);
+    }
+    
+    // Dispatcher
+    let mut count = 0;
+    let mut worker_idx = 0;
+    let mut dispatcher_error = None;
+    
+    for batch_result in rx {
+        // Check if we encountered an upstream error (parser)
+        let batch = match batch_result {
+            Ok(b) => b,
+            Err(e) => {
+                dispatcher_error = Some(e);
+                break;
+            }
+        };
+        
+        // Record indexes in the main thread
+        if let Some(ref mut collector) = index_collector.as_deref_mut() {
+            for cs in &batch {
+                collector.record(cs);
+            }
+        }
+        
+        count += batch.len();
+        if count % 1_000_000 < batch.len() {
+             println!("Processed {} changesets...", count);
+        }
+        
+        // Round-robin dispatch
+        if let Err(_) = worker_senders[worker_idx].send(batch) {
+            // The worker has died (dropped its receiver). 
+            // We break the loop to collect the actual error from the worker threads.
+            eprintln!("Worker thread {} disconnected unexpectedly. collecting errors...", worker_idx);
+            break;
+        }
+        worker_idx = (worker_idx + 1) % num_workers;
+    }
+    
+    // Drop senders to signal completion to active workers
+    drop(worker_senders);
+    
+    // Collect results and check for errors
+    let mut aggregated_summary = PartitionSummary {
+        counts: HashMap::new(),
+        stats: HashMap::new(),
+    };
+    
+    // If we had a dispatcher error (e.g. parser failed), return it
+    if let Some(e) = dispatcher_error {
+        // Wait for workers to finish what they have
+        for handle in worker_handles {
+            let _ = handle.join();
+        }
+        return Err(e);
+    }
 
-            if count % 1_000_000 == 0 {
-                println!("Processed {} changesets...", count);
+    // Collect worker results
+    for (i, handle) in worker_handles.into_iter().enumerate() {
+        match handle.join() {
+            Ok(result) => {
+                match result {
+                    Ok(summary) => aggregated_summary.merge(summary),
+                    Err(e) => {
+                        // This is likely the "Too many open files" or similar error
+                        return Err(e.context(format!("Worker {} failed", i)));
+                    }
+                }
+            }
+            Err(e) => {
+                // Thread panicked
+                let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = e.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "Unknown panic".to_string()
+                };
+                return Err(anyhow::anyhow!("Worker {} panicked: {}", i, msg));
             }
         }
     }
-
-    Ok(count)
+    
+    Ok((count, aggregated_summary))
 }
 
 fn create_schema() -> Arc<Schema> {
@@ -939,25 +1127,42 @@ fn main() -> Result<()> {
     }
 
     println!("Reading from: {}", args.input);
+    if args.workers > 1 && args.partition {
+        println!("Using {} worker threads for sharded output", args.workers);
+    }
 
     let schema = create_schema();
-
-    // Open input file
-    let file = File::open(&args.input)
-        .with_context(|| format!("Failed to open input file: {}", args.input))?;
-
+    
     let (tx, rx) = sync_channel(32);
     let continue_on_error = args.continue_on_error;
-    let input_is_bz2 = args.input.ends_with(".bz2");
+    
+    // Determine input source and compression
+    let is_stdin = args.input == "-";
+    let is_bz2 = args.input.ends_with(".bz2");
+    
+    let input_source: Box<dyn Read + Send> = if is_stdin {
+        Box::new(std::io::stdin())
+    } else {
+        Box::new(File::open(&args.input)
+            .with_context(|| format!("Failed to open input file: {}", args.input))?) 
+    };
 
     // Spawn producer thread
     let parser_handle = thread::spawn(move || {
-        if input_is_bz2 {
-            println!("Detected bzip2 multi-stream compressed file");
-            let decoder = MultiBzDecoder::new(file);
+        if is_bz2 && !is_stdin {
+            // Only try internal decompression if it's a file with .bz2 extension
+            // For stdin, we assume external decompression (pbzip2) or uncompressed stream
+            // unless the user is piping a bz2 file directly, in which case we might fail to detect.
+            // But standard usage with pipe is `pbzip2 -dc ... | tool`.
+            println!("Detected bzip2 multi-stream compressed file (internal decompression)");
+            let decoder = MultiBzDecoder::new(input_source);
             parse_xml_to_channel(decoder, tx, continue_on_error);
         } else {
-            parse_xml_to_channel(file, tx, continue_on_error);
+            // Treat as plain XML stream (could be coming from pbzip2 pipe)
+            if is_stdin {
+                println!("Reading from stdin (assuming decompressed XML stream)");
+            }
+            parse_xml_to_channel(input_source, tx, continue_on_error);
         }
     });
 
@@ -966,9 +1171,6 @@ fn main() -> Result<()> {
         let output_dir = PathBuf::from(args.output_dir.as_ref().unwrap());
         println!("Writing partitioned output to: {:?}", output_dir);
 
-        let mut partitioned_writer =
-            PartitionedWriter::new(output_dir.clone(), schema.clone(), args.batch_size)?;
-
         let mut index_collector = if args.generate_indexes {
             println!("Index generation enabled");
             Some(IndexCollector::new())
@@ -976,9 +1178,12 @@ fn main() -> Result<()> {
             None
         };
 
-        let total_count = consume_and_write_partitioned(
+        let (total_count, summary) = consume_and_write_partitioned_parallel(
             rx,
-            &mut partitioned_writer,
+            output_dir.clone(),
+            schema.clone(),
+            args.batch_size,
+            args.workers,
             index_collector.as_mut(),
         )?;
 
@@ -986,7 +1191,7 @@ fn main() -> Result<()> {
         let PartitionSummary {
             counts: partition_counts,
             stats: partition_stats,
-        } = partitioned_writer.finish()?;
+        } = summary;
 
         if let Some(collector) = index_collector {
             println!("\nWriting indexes...");
@@ -1036,7 +1241,7 @@ fn write_partition_stats_index(
     stats: &HashMap<PartitionKey, PartitionStats>,
 ) -> Result<()> {
     if stats.is_empty() {
-        return Ok(())
+        return Ok(());
     }
 
     let indexes_dir = output_dir.join("indexes");
@@ -1079,14 +1284,28 @@ fn write_partition_stats_index(
     let mut file_size_builder = Int64Builder::with_capacity(capacity);
 
     for (key, stat) in entries {
-        let path = key.path();
-        let file_size_bytes = output_dir
-            .join(&path)
-            .metadata()
-            .map(|m| m.len() as i64)
-            .unwrap_or(0);
+        // Calculate total size for the partition directory
+        let partition_path = key.dir_path();
+        let full_partition_path = output_dir.join(&partition_path);
+        
+        let file_size_bytes = if full_partition_path.is_dir() {
+            // Sum size of all files in directory
+            fs::read_dir(&full_partition_path)
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+                        .sum()
+                })
+                .unwrap_or(0)
+        } else { // Fallback for legacy single file
+             output_dir.join(key.legacy_file_path())
+                .metadata()
+                .map(|m| m.len())
+                .unwrap_or(0)
+        } as i64;
 
-        path_builder.append_value(path);
+        path_builder.append_value(partition_path);
         year_builder.append_value(key.year as i64);
         month_builder.append_value(key.month as i64);
         count_builder.append_value(stat.changeset_count as i64);
@@ -1145,7 +1364,7 @@ fn write_metadata(
             serde_json::json!({
                 "year": k.year,
                 "month": k.month,
-                "path": k.path(),
+                "path": k.dir_path(),
                 "count": v
             })
         })

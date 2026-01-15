@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     wget \
     bzip2 \
+    pbzip2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/changesets-to-parquet /usr/local/bin/
