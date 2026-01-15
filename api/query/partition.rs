@@ -304,10 +304,17 @@ fn load_partition_stats_index(root: &Path) -> Option<Vec<PartitionInfo>> {
                 let changeset_count = u64::try_from(count_val).unwrap_or(0);
                 let file_size_bytes = u64::try_from(file_size).unwrap_or(0);
 
-                let full_path = if Path::new(&path).is_absolute() {
-                    PathBuf::from(&path)
+                // Ensure path ends with .parquet extension
+                let path_with_ext = if path.ends_with(".parquet") {
+                    path.clone()
                 } else {
-                    root.join(&path)
+                    format!("{}.parquet", path)
+                };
+
+                let full_path = if Path::new(&path_with_ext).is_absolute() {
+                    PathBuf::from(&path_with_ext)
+                } else {
+                    root.join(&path_with_ext)
                 };
 
                 partitions.push(PartitionInfo {
