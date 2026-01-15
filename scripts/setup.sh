@@ -62,7 +62,7 @@ fi
 
 echo -e "\n${YELLOW}[7/8] Building and deploying initial version...${NC}"
 cd "$REPO_DIR"
-sudo -u $(logname) "$REPO_DIR/scripts/deploy.sh" "initial"
+"$REPO_DIR/scripts/deploy.sh" "initial"
 
 echo -e "\n${YELLOW}[8/8] Enabling service...${NC}"
 systemctl enable changeset-server

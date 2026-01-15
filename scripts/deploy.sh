@@ -13,6 +13,16 @@ RELEASE_DIR="$DEPLOY_DIR/releases/$VERSION"
 
 echo -e "${YELLOW}=== Deploying changeset-server version $VERSION ===${NC}"
 
+# Ensure cargo is available - source cargo env if not in PATH
+if ! command -v cargo &> /dev/null; then
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    else
+        echo -e "${RED}Error: cargo not found. Please install Rust first.${NC}"
+        exit 1
+    fi
+fi
+
 # Step 1: Build the release binary
 echo -e "\n${YELLOW}[1/7] Building release binary...${NC}"
 cargo build --release --bin changeset-server
