@@ -25,7 +25,7 @@ You can achieve significant speed-up by using `pbzip2` for multithreaded decompr
 Run with 
 
 ```bash
-DATA_PATH=/path/to/parquet/ .changeset-server
+DATA_PATH=/opt/changeset-data/changesets .changeset-server
 ```
 
 ### Endpoints

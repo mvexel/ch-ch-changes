@@ -27,9 +27,9 @@ RUN apt-get update && apt-get install -y \
 
 COPY --from=builder /app/target/release/changeset-server /usr/local/bin/
 
-RUN mkdir -p /data/changesets
+RUN mkdir -p /opt/changeset-data/changesets
 
-ENV DATA_PATH=/data/changesets
+ENV DATA_PATH=/opt/changeset-data/changesets
 
 EXPOSE 3000
 

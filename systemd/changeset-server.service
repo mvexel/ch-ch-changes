@@ -11,7 +11,7 @@ Group=changeset
 WorkingDirectory=/opt/changeset-server
 
 # Environment variables
-Environment="DATA_PATH=/opt/changeset-data"
+Environment="DATA_PATH=/opt/changeset-data/changesets"
 Environment="RUST_LOG=info"
 Environment="HOME=/var/lib/changeset-server"
 

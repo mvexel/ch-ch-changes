@@ -9,7 +9,7 @@ services:
     container_name: changeset-api
     restart: unless-stopped
     environment:
-      - DATA_PATH=/data/changesets
+      - DATA_PATH=/opt/changeset-data/changesets
       - RUST_LOG=info
     volumes:
       - changeset-data:/data
@@ -56,7 +56,7 @@ services:
       dockerfile: Dockerfile.builder
     container_name: changeset-builder
     environment:
-      - DATA_PATH=/data/changesets
+      - DATA_PATH=/opt/changeset-data/changesets
     volumes:
       - changeset-data:/data
     networks:

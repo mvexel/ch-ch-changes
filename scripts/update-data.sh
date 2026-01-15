@@ -8,7 +8,7 @@ set -e  # Exit on error
 set -o pipefail  # Exit on pipe failure
 
 # Configuration
-DATA_ROOT="/opt/changeset-data"
+DATA_ROOT="/opt/changeset-data/changesets"
 DOWNLOAD_DIR="$DATA_ROOT/downloads"
 TEMP_OUTPUT_DIR="$DATA_ROOT/temp_changesets"
 FINAL_OUTPUT_DIR="$DATA_ROOT/parquet"

@@ -200,7 +200,7 @@ sudo crontab -e
 Scripts respect these environment variables:
 
 - `ALERT_EMAIL` - Email address for health check alerts (healthcheck.sh)
-- `DATA_PATH` - Path to parquet data (default: `/data/parquet`) - set in systemd service file
+- `DATA_PATH` - Path to parquet data (default: `/opt/changeset-data/changesets`) - set in systemd service file
 
 ## See Also
 
