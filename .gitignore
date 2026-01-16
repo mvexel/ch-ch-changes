@@ -7,3 +7,5 @@ hetzner-config.env
 
 .DS_Store
 *.osm
+
+results/
