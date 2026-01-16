@@ -44,7 +44,18 @@ pub async fn get_changeset(
 
 /// Get a single changeset in XML format
 pub async fn get_changeset_xml(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
-    match state.engine.get_changeset(id) {
+    // Offload blocking DuckDB call to blocking thread pool
+    let engine = state.engine.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        engine.get_changeset(id).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Task join error: {}", e);
+        Err("Task panicked".to_string())
+    });
+
+    match result {
         Ok(Some(changeset)) => {
             let formatter = XmlFormatter::new();
             match formatter.format_changeset(&changeset) {
@@ -67,7 +78,18 @@ pub async fn get_changeset_xml(State(state): State<AppState>, Path(id): Path<i64
 
 /// Get a single changeset in JSON format
 pub async fn get_changeset_json(State(state): State<AppState>, Path(id): Path<i64>) -> Response {
-    match state.engine.get_changeset(id) {
+    // Offload blocking DuckDB call to blocking thread pool
+    let engine = state.engine.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        engine.get_changeset(id).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Task join error: {}", e);
+        Err("Task panicked".to_string())
+    });
+
+    match result {
         Ok(Some(changeset)) => {
             let formatter = JsonFormatter::new(false);
             match formatter.format_changeset(&changeset) {

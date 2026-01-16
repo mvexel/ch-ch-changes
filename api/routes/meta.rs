@@ -68,13 +68,35 @@ pub async fn get_latest(
         }));
     }
 
-    let latest_changeset_id = state.engine.get_latest_id().map_err(|e| {
+    // Offload blocking DuckDB calls to blocking thread pool
+    let engine = state.engine.clone();
+    let latest_changeset_id = tokio::task::spawn_blocking(move || {
+        engine.get_latest_id().map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Task join error: {}", e);
+        Err("Task panicked".to_string())
+    })
+    .map_err(|e| {
         tracing::error!("Latest changeset id query failed: {}", e);
         ApiError::internal_error("Failed to query latest changeset")
     })?;
 
     let (created_at, closed_at, open) = if latest_changeset_id > 0 {
-        match state.engine.get_changeset(latest_changeset_id) {
+        let engine = state.engine.clone();
+        let changeset_result = tokio::task::spawn_blocking(move || {
+            // Convert error to String to make it Send
+            engine.get_changeset(latest_changeset_id)
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("Task join error: {}", e);
+            Err("Task panicked".to_string())
+        });
+
+        match changeset_result {
             Ok(Some(changeset)) => (
                 format_timestamp_millis(changeset.created_at),
                 format_timestamp_millis(changeset.closed_at),

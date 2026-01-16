@@ -224,13 +224,25 @@ pub async fn get_changesets_by_day(
         return create_streaming_response(params.format.as_deref(), rx);
     }
 
-    // Non-streaming mode (existing behavior)
-    match state.engine.get_changesets_by_date_range(
-        &start.to_rfc3339(),
-        &end.to_rfc3339(),
-        &params.to_filters(),
-    ) {
-        Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
+    // Non-streaming mode - offload to blocking thread pool
+    let engine = state.engine.clone();
+    let start_str = start.to_rfc3339();
+    let end_str = end.to_rfc3339();
+    let filters = params.to_filters();
+    let format_opt = params.format.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        engine.get_changesets_by_date_range(&start_str, &end_str, &filters)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Task join error: {}", e);
+        Err("Task panicked".to_string())
+    });
+
+    match result {
+        Ok(changesets) => format_response(&changesets, format_opt.as_deref(), false),
         Err(e) => {
             tracing::error!("Query error: {}", e);
             ApiError::internal_error("Database query failed").into_response()
@@ -367,12 +379,24 @@ pub async fn get_changesets_by_date_range(
         return create_streaming_response(params.format.as_deref(), rx);
     }
 
-    // Non-streaming mode (existing behavior)
-    match state.engine.get_changesets_by_date_range(
-        &start_date.to_rfc3339(),
-        &end_date.to_rfc3339(),
-        &params.to_filters(),
-    ) {
+    // Non-streaming mode - offload to blocking thread pool
+    let engine = state.engine.clone();
+    let start_str = start_date.to_rfc3339();
+    let end_str = end_date.to_rfc3339();
+    let filters = params.to_filters();
+    let format_opt = params.format.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        engine.get_changesets_by_date_range(&start_str, &end_str, &filters)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Task join error: {}", e);
+        Err("Task panicked".to_string())
+    });
+
+    match result {
         Ok(changesets) => {
             // Safety limit: Check result set size to prevent OOM
             const MAX_RESULT_SIZE: usize = 100_000;
@@ -386,7 +410,7 @@ pub async fn get_changesets_by_date_range(
                 )
                 .into_response();
             }
-            format_response(&changesets, params.format.as_deref(), false)
+            format_response(&changesets, format_opt.as_deref(), false)
         }
         Err(e) => {
             tracing::error!("Query error: {}", e);
@@ -459,13 +483,25 @@ pub async fn get_changesets_by_hour(
         return create_streaming_response(params.format.as_deref(), rx);
     }
 
-    // Non-streaming mode (existing behavior)
-    match state.engine.get_changesets_by_date_range(
-        &start.to_rfc3339(),
-        &end.to_rfc3339(),
-        &params.to_filters(),
-    ) {
-        Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
+    // Non-streaming mode - offload to blocking thread pool
+    let engine = state.engine.clone();
+    let start_str = start.to_rfc3339();
+    let end_str = end.to_rfc3339();
+    let filters = params.to_filters();
+    let format_opt = params.format.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        engine.get_changesets_by_date_range(&start_str, &end_str, &filters)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Task join error: {}", e);
+        Err("Task panicked".to_string())
+    });
+
+    match result {
+        Ok(changesets) => format_response(&changesets, format_opt.as_deref(), false),
         Err(e) => {
             tracing::error!("Query error: {}", e);
             ApiError::internal_error("Database query failed").into_response()
@@ -548,13 +584,25 @@ pub async fn get_changesets_by_minute(
         return create_streaming_response(params.format.as_deref(), rx);
     }
 
-    // Non-streaming mode (existing behavior)
-    match state.engine.get_changesets_by_date_range(
-        &start.to_rfc3339(),
-        &end.to_rfc3339(),
-        &params.to_filters(),
-    ) {
-        Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
+    // Non-streaming mode - offload to blocking thread pool
+    let engine = state.engine.clone();
+    let start_str = start.to_rfc3339();
+    let end_str = end.to_rfc3339();
+    let filters = params.to_filters();
+    let format_opt = params.format.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        engine.get_changesets_by_date_range(&start_str, &end_str, &filters)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Task join error: {}", e);
+        Err("Task panicked".to_string())
+    });
+
+    match result {
+        Ok(changesets) => format_response(&changesets, format_opt.as_deref(), false),
         Err(e) => {
             tracing::error!("Query error: {}", e);
             ApiError::internal_error("Database query failed").into_response()
