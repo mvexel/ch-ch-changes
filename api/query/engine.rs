@@ -1,5 +1,5 @@
 //! DuckDB query execution engine
-//! 
+//!
 //! Manages DuckDB connections and executes queries against Parquet files.
 
 use crate::models::Changeset;
@@ -8,13 +8,34 @@ use duckdb::{
     types::{TimeUnit, Value},
     Connection,
 };
+use r2d2::{Pool, PooledConnection};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+
+/// Custom connection manager for DuckDB with r2d2
+pub struct DuckDBConnectionManager;
+
+impl r2d2::ManageConnection for DuckDBConnectionManager {
+    type Connection = Connection;
+    type Error = duckdb::Error;
+
+    fn connect(&self) -> Result<Self::Connection, Self::Error> {
+        Connection::open_in_memory()
+    }
+
+    fn is_valid(&self, conn: &mut Self::Connection) -> Result<(), Self::Error> {
+        conn.execute("SELECT 1", [])?;
+        Ok(())
+    }
+
+    fn has_broken(&self, _conn: &mut Self::Connection) -> bool {
+        false
+    }
+}
 
 /// Query engine for executing DuckDB queries
 pub struct QueryEngine {
-    conn: Arc<Mutex<Connection>>,
+    pool: Pool<DuckDBConnectionManager>,
     data_path: PathBuf,
     partition_resolver: PartitionResolver,
 }
@@ -27,23 +48,37 @@ pub struct PartitionCount {
 }
 
 impl QueryEngine {
-    /// Create a new query engine
+    /// Create a new query engine with connection pooling
     ///
     /// # Arguments
     /// - `data_path` - Path to directory containing partitioned Parquet files
+    /// - `pool_size` - Number of connections in the pool (default: 4)
     pub fn new(data_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let conn = Connection::open_in_memory()?;
+        Self::new_with_pool_size(data_path, 4)
+    }
 
-        // Initialize parquet extension if needed (usually built-in)
-        // conn.execute("INSTALL parquet; LOAD parquet;", [])?;
+    /// Create a new query engine with custom pool size
+    pub fn new_with_pool_size(
+        data_path: &str,
+        pool_size: u32,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let manager = DuckDBConnectionManager;
+        let pool = Pool::builder()
+            .max_size(pool_size)
+            .build(manager)?;
 
         let partition_resolver = PartitionResolver::new(data_path)?;
 
         Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
+            pool,
             data_path: PathBuf::from(data_path),
             partition_resolver,
         })
+    }
+
+    /// Get a connection from the pool
+    fn get_conn(&self) -> Result<PooledConnection<DuckDBConnectionManager>, Box<dyn std::error::Error>> {
+        Ok(self.pool.get()?)
     }
 
     /// Helper to get the glob patterns for all parquet files
@@ -242,7 +277,7 @@ impl QueryEngine {
 
     /// Get the latest changeset ID available
     pub fn get_latest_id(&self) -> Result<i64, Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.get_conn()?;
         let globs = self.get_glob_patterns();
         let source = if globs.len() == 1 {
             format!("'{}'", globs[0].replace('"', "''"))
@@ -268,7 +303,7 @@ impl QueryEngine {
 
     /// Get total changeset count
     pub fn get_total_count(&self) -> Result<u64, Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.get_conn()?;
         let globs = self.get_glob_patterns();
         let source = if globs.len() == 1 {
             format!("'{}'", globs[0].replace('"', "''"))
@@ -294,7 +329,7 @@ impl QueryEngine {
     }
 
     pub fn get_earliest_id(&self) -> Result<i64, Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.get_conn()?;
         let globs = self.get_glob_patterns();
         let source = if globs.len() == 1 {
             format!("'{}'", globs[0].replace('"', "''"))
@@ -320,7 +355,7 @@ impl QueryEngine {
     pub fn get_created_at_bounds(
         &self,
     ) -> Result<(Option<i64>, Option<i64>), Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.get_conn()?;
         let globs = self.get_glob_patterns();
         let source = if globs.len() == 1 {
             format!("'{}'", globs[0].replace('"', "''"))
@@ -349,7 +384,7 @@ impl QueryEngine {
     }
 
     pub fn get_partition_counts(&self) -> Result<Vec<PartitionCount>, Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.get_conn()?;
         let files = list_parquet_files(self.data_path());
         let mut counts_map: std::collections::HashMap<(u32, u32), u64> =
             std::collections::HashMap::new();
@@ -410,7 +445,7 @@ impl QueryEngine {
         &self,
         query: &str,
     ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.get_conn()?;
         let mut stmt = conn.prepare(query)?;
         let mut rows = stmt.query([])?;
         let mut changesets = Vec::new();
@@ -428,7 +463,8 @@ impl QueryEngine {
         query: &str,
         tx: tokio::sync::mpsc::Sender<Changeset>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.get_conn()
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
         let mut stmt = conn.prepare(query)?;
         let mut rows = stmt.query([])?;
 
