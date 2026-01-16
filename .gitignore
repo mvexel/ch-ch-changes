@@ -11,7 +11,9 @@ hetzner-config.env
 results/
 
 .env
-.env.Local
-
+.env.local
 
 data/
+
+# sqlite auth db if stored here..
+*.db*

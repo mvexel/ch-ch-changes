@@ -808,7 +808,7 @@ dependencies = [
  "parquet",
  "quick-xml",
  "r2d2",
- "rand",
+ "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",
