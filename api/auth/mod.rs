@@ -14,7 +14,7 @@ pub mod middleware;
 pub mod routes;
 
 pub use config::AuthConfig;
-pub use db::{AuthenticatedKey, AuthDb, UsageSnapshot, UserRecord};
+pub use db::{AuthDb, AuthenticatedKey};
 
 const OAUTH_STATE_TTL: Duration = Duration::from_secs(600);
 const API_KEY_PREFIX: &str = "osmcs_";

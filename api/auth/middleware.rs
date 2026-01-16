@@ -1,6 +1,7 @@
 use crate::auth::hash_key;
 use crate::models::ApiError;
 use crate::state::AppState;
+use axum::body::Body;
 use axum::extract::State;
 use axum::http::{header, HeaderMap, HeaderValue, Method, Request, Uri};
 use axum::middleware::Next;
@@ -9,7 +10,7 @@ use chrono::Utc;
 
 pub async fn auth_middleware(
     State(state): State<AppState>,
-    mut req: Request,
+    mut req: Request<Body>,
     next: Next,
 ) -> Result<Response, ApiError> {
     if req.method() == Method::OPTIONS {
@@ -21,10 +22,11 @@ pub async fn auth_middleware(
         return Ok(next.run(req).await);
     }
 
-    let raw_key =
-        extract_api_key(req.headers(), req.uri()).ok_or_else(|| ApiError::unauthorized(
+    let raw_key = extract_api_key(req.headers(), req.uri()).ok_or_else(|| {
+        ApiError::unauthorized(
             "Missing API key. Use Authorization: Bearer <key> or X-API-Key header.",
-        ))?;
+        )
+    })?;
 
     let key_hash = hash_key(&state.auth.config.key_secret, &raw_key);
     let auth_key = state
@@ -90,7 +92,11 @@ pub async fn auth_middleware(
         .increment_usage(auth_key.api_key_id, &day, &month)
         .await
     {
-        tracing::error!("Failed to record usage for key {}: {}", auth_key.key_prefix, err);
+        tracing::error!(
+            "Failed to record usage for key {}: {}",
+            auth_key.key_prefix,
+            err
+        );
     }
 
     Ok(response)

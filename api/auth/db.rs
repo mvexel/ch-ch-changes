@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
 use std::path::Path;
 use std::sync::Arc;
-use tokio_rusqlite::rusqlite::{params, OptionalExtension};
 use tokio_rusqlite::Connection;
+use tokio_rusqlite::{params, OptionalExtension};
 
 #[derive(Clone)]
 pub struct AuthDb {
@@ -140,7 +140,7 @@ impl AuthDb {
                     defaults.daily_limit,
                     defaults.monthly_limit
                 ],
-            )?;
+            );
 
             let mut stmt = conn.prepare(
                 "SELECT id, osm_uid, display_name, daily_limit, monthly_limit
@@ -158,7 +158,7 @@ impl AuthDb {
             Ok(record)
         })
         .await
-        .context("Failed to upsert user")?
+        .context("Failed to upsert user")
     }
 
     pub async fn revoke_user_keys(&self, user_id: i64) -> Result<()> {
