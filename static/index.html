@@ -29,18 +29,6 @@
         }
         pre code { background: none; padding: 0; }
         a { color: #0066cc; }
-        .button {
-            display: inline-block;
-            margin: 8px 0;
-            padding: 10px 16px;
-            border-radius: 6px;
-            background: #1d73c9;
-            color: #fff;
-            text-decoration: none;
-            font-weight: 600;
-        }
-        .button:hover { background: #165a9f; }
-        .note { color: #555; font-size: 0.95em; }
         .endpoint { color: #008800; font-weight: bold; }
         ul { padding-left: 20px; }
     </style>
@@ -49,12 +37,6 @@
     <h1>OSM Bulk Changeset API</h1>
 
     <p>Query OpenStreetMap changeset metadata in bulk.</p>
-
-    <h2>Authentication</h2>
-    <p>All data endpoints now require an API key. <code>/health</code> and <code>/meta/latest</code> remain public.</p>
-    <a class="button" href="/auth/osm/start">Sign in with OpenStreetMap</a>
-    <p class="note">Signing in issues a new API key. Save it; it will not be shown again. Signing in again rotates the key.</p>
-    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://DOMAIN/changesets/day/20240115.json</code></pre>
 
     <p>This service is useful if you want to retrieve metadata for a non-trivial subset of OSM changeset metadata.
         OSM lets you retrieve up to 100 at the time using the OSM API (<a href="https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets">docs</a>).
@@ -76,48 +58,52 @@
 
     <p>Changeset data is updated weekly using the canonical changeset archive file OSM makes available. Check the <code>/meta/latest</code> endpoint for the latest changeset info.</p>
 
+    <h2>Authentication</h2>
+    All data endpoints require an API key. Get one by logging in via OSM <a href="/auth/osm/start">here</a>. You will be issued a new API key after. Save it; it will not be shown again. Signing in again rotates the key.</p>
+    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://DOMAIN/changesets/day/20240115.json</code></pre>
+
     <h2>API Endpoints</h2>
 
     <p><span class="endpoint">GET /health</span> - Health check</p>
-    <pre><code>curl https://DOMAIN/health</code></pre>
+    <pre><code>https://DOMAIN/health</code></pre>
 
-    <p><span class="endpoint">GET /changeset/{id}</span> - Single changeset</p>
+    <p><span class="endpoint">GET /changeset/{id}</span> - Single changeset 🔐</p>
     <pre><code># XML format (default)
-curl https://DOMAIN/changeset/1
+https://DOMAIN/changeset/1
 
 # JSON format (using extension)
-curl https://DOMAIN/changeset/1.json
+https://DOMAIN/changeset/1.json
 
 # JSON format (using query param)
-curl https://DOMAIN/changeset/1?format=json</code></pre>
+https://DOMAIN/changeset/1?format=json</code></pre>
 
-    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}</span> - All changesets on a date</p>
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}</span> - All changesets on a date 🔐</p>
     <pre><code># XML format (default)
-curl https://DOMAIN/changesets/day/20240115
+https://DOMAIN/changesets/day/20240115
 
 # JSON format
-curl https://DOMAIN/changesets/day/20240115.json
+https://DOMAIN/changesets/day/20240115.json
 
 # JSONL format (one changeset per line, useful for large results)
-curl https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
+https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
 
-    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}</span> - All changesets in a specific hour</p>
-    <pre><code>curl https://DOMAIN/changesets/day/20240115/hour/23.json</code></pre>
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}</span> - All changesets in a specific hour 🔐</p>
+    <pre><code>https://DOMAIN/changesets/day/20240115/hour/23.json</code></pre>
 
-    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}/minute/{MM}</span> - All changesets in a specific minute</p>
-    <pre><code>curl https://DOMAIN/changesets/day/20240115/hour/23/minute/59.json</code></pre>
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}/minute/{MM}</span> - All changesets in a specific minute 🔐</p>
+    <pre><code>https://DOMAIN/changesets/day/20240115/hour/23/minute/59.json</code></pre>
 
-    <p><span class="endpoint">GET /changesets/date/from/{start}/to/{end}</span> - Date range (entire days) <strong>response can be huge!</strong></p>
-    <pre><code>curl https://DOMAIN/changesets/date/from/20240101/to/20240131.json</code></pre>
+    <p><span class="endpoint">GET /changesets/date/from/{start}/to/{end}</span> - Date range (entire days) <strong>response can be huge!</strong> 🔐</p>
+    <pre><code>https://DOMAIN/changesets/date/from/20240101/to/20240131.json</code></pre>
 
-    <p><span class="endpoint">GET /changesets/id/from/{start}/to/{end}</span> - Changeset ID range <strong>response can be huge!</strong></p>
-    <pre><code>curl https://DOMAIN/changesets/id/from/1/to/100.json</code></pre>
+    <p><span class="endpoint">GET /changesets/id/from/{start}/to/{end}</span> - Changeset ID range <strong>response can be huge!</strong> 🔐</p>
+    <pre><code>https://DOMAIN/changesets/id/from/1/to/100.json</code></pre>
 
     <p><span class="endpoint">GET /meta/latest</span> - Latest changeset info</p>
-    <pre><code>curl https://DOMAIN/meta/latest</code></pre>
+    <pre><code>https://DOMAIN/meta/latest</code></pre>
 
-    <p><span class="endpoint">GET /auth/me</span> - Account limits &amp; usage (requires API key)</p>
-    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://DOMAIN/auth/me</code></pre>
+    <p><span class="endpoint">GET /auth/me</span> - Account limits &amp; usage 🔐</p>
+    <pre><code>https://DOMAIN/auth/me</code></pre>
 
     <h3>Format Options</h3>
 
@@ -142,7 +128,7 @@ curl https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
     </ul>
 
     <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
-curl "https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
+"https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
 
     <p>Remember that <em>OSM usernames are case-sensitive, so <code>alice</code> is probably not the same mapper as <code>Alice</code></em>.</p>
 
