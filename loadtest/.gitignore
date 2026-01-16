@@ -1,0 +1,19 @@
+# Ignore test results (except baseline for comparison)
+results/json/*
+results/csv/*
+results/*-summary.txt
+
+# Keep baseline results for comparison
+!results/json/baseline_*.json
+!results/csv/baseline_*.csv
+!results/baseline_*-summary.txt
+
+# Keep directory structure
+!results/json/.gitkeep
+!results/csv/.gitkeep
+
+# Node modules if any
+node_modules/
+
+# OS files
+.DS_Store
