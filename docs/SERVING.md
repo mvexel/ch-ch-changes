@@ -82,6 +82,34 @@ scp changesets_*.parquet your-server:/data/parquet/
 # See "Initial Data Load" section below
 ```
 
+### Authentication Configuration
+
+The API now requires OSM OAuth2 and API keys for data endpoints. Configure these environment variables in your systemd service (or a drop-in):
+
+- `OSM_OAUTH_CLIENT_ID` - OSM OAuth2 client ID
+- `OSM_OAUTH_CLIENT_SECRET` - OSM OAuth2 client secret
+- `OSM_OAUTH_REDIRECT_URL` - e.g. `https://changesets.yourdomain.com/auth/osm/callback`
+- `AUTH_KEY_SECRET` - random secret used to hash API keys
+- `AUTH_DB_PATH` - path to the local SQLite auth DB (e.g. `/var/lib/changeset-server/auth.sqlite`)
+- `AUTH_DEFAULT_DAILY_LIMIT` - default daily request limit for new users (omit or `0` for unlimited)
+- `AUTH_DEFAULT_MONTHLY_LIMIT` - default monthly request limit for new users (omit or `0` for unlimited)
+
+Optional overrides:
+
+- `OSM_OAUTH_SCOPE` (default: `read_prefs`)
+- `OSM_OAUTH_AUTHORIZE_URL`
+- `OSM_OAUTH_TOKEN_URL`
+- `OSM_OAUTH_USER_DETAILS_URL`
+
+Generate a secret with: `openssl rand -hex 32`
+
+To set per-user limits later, update the local SQLite DB (example sets 5k/day and 100k/month for OSM uid 12345):
+
+```bash
+sqlite3 /var/lib/changeset-server/auth.sqlite \
+  "UPDATE users SET daily_limit=5000, monthly_limit=100000 WHERE osm_uid=12345;"
+```
+
 ### Step 5: Start the Service
 
 ```bash

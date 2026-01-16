@@ -33,6 +33,21 @@ DATA_PATH=/opt/changeset-data/changesets .changeset-server
 To keep data fresh between full refreshes, use the minutely replication worker. See
 `docs/REPLICATION_WORKER.md` for setup and systemd instructions.
 
+### Authentication
+
+The API now requires an API key for all data endpoints. Obtain a key by signing in with your OpenStreetMap account:
+
+- Start OAuth: `GET /auth/osm/start`
+- Key issued on callback and shown once
+
+Use the key on requests:
+
+```bash
+curl -H "Authorization: Bearer YOUR_KEY" https://DOMAIN/changesets/day/20240115.json
+```
+
+`/health` remains public.
+
 ### Endpoints
 
 - `GET /health - Health check`
@@ -41,6 +56,7 @@ To keep data fresh between full refreshes, use the minutely replication worker. 
 - `GET /changesets/day/{YYYYMMDD}/hour/{HH}/[minute/{MM}]` - All changesets on a date and time.
 - `GET /changesets/from/{start}/to/{end}` - Date range (only handles entire days) response can be huge!
 - `GET /meta/replication` - Replication state (sequence + last_run)
+- `GET /auth/me` - Account limits & usage (requires API key)
 
 ## Geoparquet?
 

@@ -9,6 +9,7 @@ use std::time::Instant;
 use tower_http::cors::CorsLayer;
 
 mod constants;
+mod auth;
 mod format;
 mod models;
 mod query;
@@ -37,9 +38,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         e
     })?;
 
+    let auth_config = auth::AuthConfig::from_env().map_err(|e| {
+        tracing::error!("Auth configuration error: {}", e);
+        e
+    })?;
+    let auth_state = auth::AuthState::new(auth_config).await.map_err(|e| {
+        tracing::error!("Failed to initialize auth state: {}", e);
+        e
+    })?;
+    tracing::info!(
+        "Auth DB: {}",
+        auth_state.config.db_path.display()
+    );
+
     let state = AppState {
         engine: Arc::new(engine),
         started_at: Instant::now(),
+        auth: auth_state,
     };
 
     // Create router

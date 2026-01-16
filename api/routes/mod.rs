@@ -8,11 +8,17 @@ pub mod changesets;
 pub mod meta;
 
 use crate::AppState;
-use axum::{routing::get, Router};
+use axum::{middleware, routing::get, Router};
+use crate::auth;
 
 /// Create the main API router with all routes
 pub fn create_router(state: AppState) -> Router {
-    Router::new()
+    let public_routes = Router::new()
+        .route("/health", get(meta::health))
+        .route("/auth/osm/start", get(auth::routes::oauth_start))
+        .route("/auth/osm/callback", get(auth::routes::oauth_callback));
+
+    let protected_routes = Router::new()
         .route("/changeset/:id", get(changeset::get_changeset))
         .route(
             "/changesets/day/:date",
@@ -34,7 +40,15 @@ pub fn create_router(state: AppState) -> Router {
             "/changesets/date/from/:start/to/:end",
             get(changesets::get_changesets_by_date_range),
         )
-        .route("/health", get(meta::health))
         .route("/meta/replication", get(meta::get_replication_state))
+        .route("/auth/me", get(auth::routes::get_me))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ));
+
+    Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
         .with_state(state)
 }

@@ -14,6 +14,13 @@ WorkingDirectory=/opt/changeset-server
 Environment="DATA_PATH=/opt/changeset-data/changesets"
 Environment="RUST_LOG=info"
 Environment="HOME=/var/lib/changeset-server"
+Environment="AUTH_DB_PATH=/var/lib/changeset-server/auth.sqlite"
+Environment="AUTH_KEY_SECRET=change-me"
+Environment="OSM_OAUTH_CLIENT_ID=change-me"
+Environment="OSM_OAUTH_CLIENT_SECRET=change-me"
+Environment="OSM_OAUTH_REDIRECT_URL=https://changesets.yourdomain.com/auth/osm/callback"
+Environment="AUTH_DEFAULT_DAILY_LIMIT=0"
+Environment="AUTH_DEFAULT_MONTHLY_LIMIT=0"
 
 # Binary location
 ExecStart=/opt/changeset-server/bin/changeset-server

@@ -138,11 +138,13 @@ mod tests {
     use duckdb::Connection;
     use serde_json::Value;
     use std::fs;
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Instant;
     use tempfile::TempDir;
+    use crate::auth::{AuthConfig, AuthState};
 
-    fn setup_state() -> (TempDir, AppState) {
+    async fn setup_state() -> (TempDir, AppState) {
         let dir = TempDir::new().expect("tempdir");
         let year_dir = dir.path().join("year=2024");
         fs::create_dir_all(&year_dir).expect("year dir");
@@ -185,9 +187,25 @@ mod tests {
         conn.execute_batch(&copy_sql).expect("copy parquet");
 
         let engine = crate::query::QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
+        let auth_state = AuthState::new(AuthConfig {
+            oauth_client_id: "test".to_string(),
+            oauth_client_secret: "test".to_string(),
+            oauth_redirect_url: "http://localhost/auth/osm/callback".to_string(),
+            oauth_authorize_url: "https://example.com".to_string(),
+            oauth_token_url: "https://example.com".to_string(),
+            oauth_user_details_url: "https://example.com".to_string(),
+            oauth_scope: "read_prefs".to_string(),
+            key_secret: "test-secret".to_string(),
+            db_path: PathBuf::from(":memory:"),
+            default_daily_limit: None,
+            default_monthly_limit: None,
+        })
+        .await
+        .expect("auth");
         let state = AppState {
             engine: Arc::new(engine),
             started_at: Instant::now(),
+            auth: auth_state,
         };
 
         (dir, state)
@@ -195,7 +213,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_changeset_json_suffix() {
-        let (_dir, state) = setup_state();
+        let (_dir, state) = setup_state().await;
         let response = get_changeset(
             State(state),
             Path("1.json".to_string()),
@@ -220,7 +238,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_changeset_xml_default() {
-        let (_dir, state) = setup_state();
+        let (_dir, state) = setup_state().await;
         let response = get_changeset(
             State(state),
             Path("1".to_string()),

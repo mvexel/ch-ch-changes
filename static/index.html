@@ -29,6 +29,18 @@
         }
         pre code { background: none; padding: 0; }
         a { color: #0066cc; }
+        .button {
+            display: inline-block;
+            margin: 8px 0;
+            padding: 10px 16px;
+            border-radius: 6px;
+            background: #1d73c9;
+            color: #fff;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .button:hover { background: #165a9f; }
+        .note { color: #555; font-size: 0.95em; }
         .endpoint { color: #008800; font-weight: bold; }
         ul { padding-left: 20px; }
     </style>
@@ -37,6 +49,12 @@
     <h1>OSM Bulk Changeset API</h1>
 
     <p>Query OpenStreetMap changeset metadata in bulk.</p>
+
+    <h2>Authentication</h2>
+    <p>All data endpoints now require an API key. <code>/health</code> and <code>/meta/latest</code> remain public.</p>
+    <a class="button" href="/auth/osm/start">Sign in with OpenStreetMap</a>
+    <p class="note">Signing in issues a new API key. Save it; it will not be shown again. Signing in again rotates the key.</p>
+    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://DOMAIN/changesets/day/20240115.json</code></pre>
 
     <p>This service is useful if you want to retrieve metadata for a non-trivial subset of OSM changeset metadata.
         OSM lets you retrieve up to 100 at the time using the OSM API (<a href="https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets">docs</a>).
@@ -98,6 +116,9 @@ curl https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
     <p><span class="endpoint">GET /meta/latest</span> - Latest changeset info</p>
     <pre><code>curl https://DOMAIN/meta/latest</code></pre>
 
+    <p><span class="endpoint">GET /auth/me</span> - Account limits &amp; usage (requires API key)</p>
+    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://DOMAIN/auth/me</code></pre>
+
     <h3>Format Options</h3>
 
     <p>All endpoints support multiple output formats:</p>
@@ -152,7 +173,7 @@ curl "https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"</code></p
 
     <h2>Rate Limits</h2>
 
-    <p>None currently. This service offered as-is with no uptime / availability guarantees.</p>
+    <p>Daily and monthly request limits can be set per account. Check <code>/auth/me</code> for your current limits.</p>
 
     <h2>See also</h2>
     <ul>
