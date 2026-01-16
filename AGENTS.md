@@ -15,8 +15,7 @@ This repo contains two Rust binaries:
 - `GET /changesets/day/{YYYYMMDD}`
 - `GET /changesets/day/{YYYYMMDD}/hour/{HH}/minute/{MM}`
 - `GET /changesets/from/{start}/to/{end}`
-- `GET /meta/tip`
-- `GET /meta/coverage`
+- `GET /meta/latest`
 
 ## Docs
 - Server deployment and ops notes: `docs/SERVING.md`

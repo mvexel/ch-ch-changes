@@ -60,11 +60,9 @@ export default function () {
   const random_minute = Math.floor(Math.random() * 60);
   if (r < 0.1) {
     res = req(`${BASE}/health`, "health");
-  // } else if (r < 0.2) {
-  //   res = req(`${BASE}/meta/tip`, "meta_tip");
-  // } else if (r < 0.35) {
-  //   res = req(`${BASE}/meta/coverage`, "meta_coverage");
   } else if (r < 0.2) {
+    res = req(`${BASE}/meta/latest`, "meta_latest");
+  } else if (r < 0.3) {
     res = req(`${BASE}/changeset/${random_changeset_id}.json`, "changeset_single");
   } else if (r < 0.8) {
     res = req(`${BASE}/changesets/day/${date_to_yyyymmdd(get_random_date())}`, "changesets_day");

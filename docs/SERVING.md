@@ -547,7 +547,7 @@ journalctl -u changeset-server --since today         # Today's logs
 
 # Monitoring
 curl http://localhost:3000/health                    # Health check
-curl http://localhost:3000/meta/coverage            # Data coverage
+curl http://localhost:3000/meta/latest              # Latest changeset info
 systemctl show changeset-server | grep Memory       # Memory usage
 ```
 

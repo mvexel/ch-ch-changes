@@ -35,7 +35,6 @@ pub fn create_router(state: AppState) -> Router {
             get(changesets::get_changesets_by_date_range),
         )
         .route("/health", get(meta::health))
-        .route("/meta/tip", get(meta::get_tip))
-        .route("/meta/coverage", get(meta::get_coverage))
+        .route("/meta/latest", get(meta::get_latest))
         .with_state(state)
 }

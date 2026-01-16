@@ -26,9 +26,13 @@ pub struct QueryParams {
     pub open: Option<bool>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
-    /// Enable streaming response mode
+    /// Request streaming response mode (currently disabled)
     pub stream: Option<bool>,
 }
+
+// Streaming is disabled due to severe performance/oom issues under load.
+// Keep the code paths in place for a future revisit with proper isolation.
+const STREAMING_ENABLED: bool = false;
 
 impl QueryParams {
     fn to_filters(&self) -> QueryFilters {
@@ -138,6 +142,14 @@ fn create_streaming_response(
     }
 }
 
+fn streaming_disabled_response() -> Response {
+    ApiError::bad_request_with_details(
+        "Streaming disabled",
+        "Streaming responses are temporarily disabled due to performance issues under load.",
+    )
+    .into_response()
+}
+
 /// Create an async stream that formats changesets using the given formatter
 fn create_format_stream<F: StreamingFormatter + 'static>(
     formatter: F,
@@ -194,6 +206,9 @@ pub async fn get_changesets_by_day(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
+        if !STREAMING_ENABLED {
+            return streaming_disabled_response();
+        }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let start_str = start.to_rfc3339();
@@ -257,6 +272,9 @@ pub async fn get_changesets_by_id_range(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
+        if !STREAMING_ENABLED {
+            return streaming_disabled_response();
+        }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let filters = params.to_filters();
@@ -317,6 +335,9 @@ pub async fn get_changesets_by_date_range(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
+        if !STREAMING_ENABLED {
+            return streaming_disabled_response();
+        }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let start = start_date.to_rfc3339();
@@ -392,6 +413,9 @@ pub async fn get_changesets_by_hour(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
+        if !STREAMING_ENABLED {
+            return streaming_disabled_response();
+        }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let start_str = start.to_rfc3339();
@@ -478,6 +502,9 @@ pub async fn get_changesets_by_minute(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
+        if !STREAMING_ENABLED {
+            return streaming_disabled_response();
+        }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let start_str = start.to_rfc3339();
@@ -565,6 +592,7 @@ mod tests {
         let state = AppState {
             engine: Arc::new(engine),
             started_at: Instant::now(),
+            latest_changeset_cache: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         (dir, state)

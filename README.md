@@ -35,8 +35,7 @@ DATA_PATH=/opt/changeset-data/changesets .changeset-server
 - `GET /changesets/day/{YYYYMMDD}` - All changesets on a date
 - `GET /changesets/day/{YYYYMMDD}/hour/{HH}/[minute/{MM}]` - All changesets on a date and time.
 - `GET /changesets/from/{start}/to/{end}` - Date range (only handles entire days) response can be huge!
-- `GET /meta/tip` - Latest changeset ID
-- `GET /meta/coverage` - Available date range
+- `GET /meta/latest` - Latest changeset ID with open/close timestamps
 
 ## Geoparquet?
 

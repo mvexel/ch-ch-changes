@@ -56,7 +56,7 @@
 
     <h3>Data Updates</h3>
 
-    <p>Changeset data is updated weekly using the canonical changeset archive file OSM makes available. Check the <code>/meta/coverage</code> endpoint for the latest available date.</p>
+    <p>Changeset data is updated weekly using the canonical changeset archive file OSM makes available. Check the <code>/meta/latest</code> endpoint for the latest changeset info.</p>
 
     <h2>API Endpoints</h2>
 
@@ -95,11 +95,8 @@ curl https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
     <p><span class="endpoint">GET /changesets/id/from/{start}/to/{end}</span> - Changeset ID range <strong>response can be huge!</strong></p>
     <pre><code>curl https://DOMAIN/changesets/id/from/1/to/100.json</code></pre>
 
-    <p><span class="endpoint">GET /meta/tip</span> - Latest changeset ID</p>
-    <pre><code>curl https://DOMAIN/meta/tip</code></pre>
-
-    <p><span class="endpoint">GET /meta/coverage</span> - Available date range</p>
-    <pre><code>curl https://DOMAIN/meta/coverage</code></pre>
+    <p><span class="endpoint">GET /meta/latest</span> - Latest changeset info</p>
+    <pre><code>curl https://DOMAIN/meta/latest</code></pre>
 
     <h3>Format Options</h3>
 
@@ -114,36 +111,17 @@ curl https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
 
     <h3>Query Parameters</h3>
 
-    <p>Batch endpoints (day/hour/minute/range) support filtering, pagination, and streaming:</p>
+    <p>Batch endpoints (day/hour/minute/range) support filtering and pagination:</p>
     <ul>
         <li><code>user</code> - Filter by username (e.g., <code>?user=alice</code>)</li>
         <li><code>uid</code> - Filter by user ID (e.g., <code>?uid=123</code>)</li>
         <li><code>open</code> - Filter by open/closed status (e.g., <code>?open=true</code>)</li>
         <li><code>limit</code> - Limit number of results (e.g., <code>?limit=100</code>)</li>
         <li><code>offset</code> - Offset for pagination (e.g., <code>?offset=100</code>)</li>
-        <li><code>stream</code> - Enable streaming responses for large result sets (e.g., <code>?stream=true</code>)</li>
     </ul>
 
     <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
-curl "https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"
-
-# Example: Stream large date range (useful with curl -N to disable buffering)
-curl -N "https://DOMAIN/changesets/date/from/20240101/to/20240131.jsonl?stream=true"</code></pre>
-
-    <h4>Streaming Responses</h4>
-
-    <p>For large queries (date ranges, busy days), use <code>?stream=true</code> to get incremental results instead of waiting for the entire response to buffer. This is especially useful with JSONL format:</p>
-    <ul>
-        <li>Results are sent as they're retrieved from the database</li>
-        <li>Lower memory usage on both client and server</li>
-        <li>Faster time-to-first-byte for large queries</li>
-        <li>Works with all formats (JSON, JSONL, XML)</li>
-    </ul>
-
-    <pre><code># Stream changesets and process them incrementally
-curl -N "https://DOMAIN/changesets/day/20240115.jsonl?stream=true" | while read line; do
-  echo "$line" | jq .id
-done</code></pre>
+curl "https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
 
     <p>Remember that <em>OSM usernames are case-sensitive, so <code>alice</code> is probably not the same mapper as <code>Alice</code></em>.</p>
 

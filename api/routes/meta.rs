@@ -4,19 +4,18 @@
 //!
 //! # Endpoints
 //! - `GET /health` - Health check endpoint
-//! - `GET /meta/tip` - Get information about the latest data
-//! - `GET /meta/coverage` - Get dataset coverage information
+//! - `GET /meta/latest` - Get the latest changeset info (cached)
 //!
 //! # Responses
 //! - 200 OK with JSON metadata
 //! - 500 Internal Server Error if metadata unavailable
 
-use crate::state::AppState;
+use crate::models::ApiError;
+use crate::state::{AppState, LatestChangesetCache};
 use crate::API_VERSION;
 use axum::{extract::State, Json};
 use chrono::{SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -30,34 +29,11 @@ pub struct HealthResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TipResponse {
-    pub last_updated: String,
+pub struct LatestChangesetResponse {
     pub latest_changeset_id: i64,
-    pub earliest_changeset_id: i64,
-    pub total_changesets: u64,
-    pub data_through: String,
-    pub update_frequency: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CoverageResponse {
-    pub temporal: TemporalCoverage,
-    pub partitions: Vec<PartitionInfo>,
-    pub total_changesets: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TemporalCoverage {
-    pub start: String,
-    pub end: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PartitionInfo {
-    pub year: u32,
-    pub month: u32,
-    pub count: u64,
-    pub file_size_mb: f64,
+    pub created_at: String,
+    pub closed_at: String,
+    pub open: bool,
 }
 
 /// Health check endpoint
@@ -77,57 +53,60 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     })
 }
 
-/// Get tip/boundary information
+/// Get latest changeset information.
 ///
-/// Returns metadata about the latest changeset data available.
-/// update_frequency is currently hardcoded.
-pub async fn get_tip(State(state): State<AppState>) -> Json<TipResponse> {
-    let parquet_files = list_parquet_files(state.engine.data_path());
-    let last_updated = latest_modified_rfc3339(&parquet_files).unwrap_or_default();
+/// Cached on first request to avoid repeated expensive scans. Restart to refresh.
+pub async fn get_latest(
+    State(state): State<AppState>,
+) -> Result<Json<LatestChangesetResponse>, ApiError> {
+    if let Some(cached) = state.latest_changeset_cache.read().await.clone() {
+        return Ok(Json(LatestChangesetResponse {
+            latest_changeset_id: cached.latest_changeset_id,
+            created_at: cached.created_at,
+            closed_at: cached.closed_at,
+            open: cached.open,
+        }));
+    }
 
-    let latest_changeset_id = state.engine.get_latest_id().unwrap_or(0);
-    let earliest_changeset_id = state.engine.get_earliest_id().unwrap_or(0);
-    let total_changesets = state.engine.get_total_count().unwrap_or(0);
-    let (_start, end) = state.engine.get_created_at_bounds().unwrap_or((None, None));
+    let latest_changeset_id = state.engine.get_latest_id().map_err(|e| {
+        tracing::error!("Latest changeset id query failed: {}", e);
+        ApiError::internal_error("Failed to query latest changeset")
+    })?;
 
-    Json(TipResponse {
-        last_updated,
+    let (created_at, closed_at, open) = if latest_changeset_id > 0 {
+        match state.engine.get_changeset(latest_changeset_id) {
+            Ok(Some(changeset)) => (
+                format_timestamp_millis(changeset.created_at),
+                format_timestamp_millis(changeset.closed_at),
+                changeset.open,
+            ),
+            Ok(None) => (String::new(), String::new(), false),
+            Err(e) => {
+                tracing::error!("Latest changeset lookup failed: {}", e);
+                return Err(ApiError::internal_error(
+                    "Failed to query latest changeset",
+                ));
+            }
+        }
+    } else {
+        (String::new(), String::new(), false)
+    };
+
+    let response = LatestChangesetResponse {
         latest_changeset_id,
-        earliest_changeset_id,
-        total_changesets,
-        data_through: format_timestamp_millis(end),
-        update_frequency: "weekly".to_string(),
-    })
-}
+        created_at,
+        closed_at,
+        open,
+    };
 
-/// Get dataset coverage information
-///
-/// Returns detailed information about available partitions and temporal coverage.
-pub async fn get_coverage(State(state): State<AppState>) -> Json<CoverageResponse> {
-    let parquet_files = list_parquet_files(state.engine.data_path());
-    let partition_counts = state.engine.get_partition_counts().unwrap_or_default();
-    let partition_map = partition_counts
-        .into_iter()
-        .map(|entry| ((entry.year, entry.month), entry.count))
-        .collect::<HashMap<_, _>>();
+    *state.latest_changeset_cache.write().await = Some(LatestChangesetCache {
+        latest_changeset_id: response.latest_changeset_id,
+        created_at: response.created_at.clone(),
+        closed_at: response.closed_at.clone(),
+        open: response.open,
+    });
 
-    let mut partitions: Vec<PartitionInfo> = parquet_files
-        .iter()
-        .filter_map(|path| build_partition_info(path, &partition_map))
-        .collect();
-    partitions.sort_by_key(|p| (p.year, p.month));
-
-    let (start, end) = state.engine.get_created_at_bounds().unwrap_or((None, None));
-    let total_changesets = state.engine.get_total_count().unwrap_or(0);
-
-    Json(CoverageResponse {
-        temporal: TemporalCoverage {
-            start: format_timestamp_millis(start),
-            end: format_timestamp_millis(end),
-        },
-        partitions,
-        total_changesets,
-    })
+    Ok(Json(response))
 }
 
 fn list_parquet_files(data_path: &Path) -> Vec<PathBuf> {
@@ -152,43 +131,6 @@ fn collect_parquet_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn build_partition_info(
-    path: &Path,
-    partition_counts: &HashMap<(u32, u32), u64>,
-) -> Option<PartitionInfo> {
-    let (year, month) = parse_partition_key(path)?;
-    let count = *partition_counts.get(&(year, month)).unwrap_or(&0);
-    let size_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    let file_size_mb = (size_bytes as f64) / (1024.0 * 1024.0);
-
-    Some(PartitionInfo {
-        year,
-        month,
-        count,
-        file_size_mb,
-    })
-}
-
-fn parse_partition_key(path: &Path) -> Option<(u32, u32)> {
-    let mut year: Option<u32> = None;
-    let mut month: Option<u32> = None;
-
-    for component in path.components() {
-        let part = component.as_os_str().to_string_lossy();
-        if let Some(value) = part.strip_prefix("year=") {
-            year = value.parse::<u32>().ok();
-        } else if let Some(value) = part.strip_prefix("month=") {
-            let value = value.trim_end_matches(".parquet");
-            month = value.parse::<u32>().ok();
-        }
-    }
-
-    match (year, month) {
-        (Some(year), Some(month)) => Some((year, month)),
-        _ => None,
-    }
-}
-
 fn format_timestamp_millis(value: Option<i64>) -> String {
     match value {
         Some(ts) => Utc
@@ -198,21 +140,6 @@ fn format_timestamp_millis(value: Option<i64>) -> String {
             .unwrap_or_default(),
         None => String::new(),
     }
-}
-
-fn latest_modified_rfc3339(files: &[PathBuf]) -> Option<String> {
-    let latest = files
-        .iter()
-        .filter_map(|path| fs::metadata(path).ok()?.modified().ok())
-        .max();
-
-    latest.and_then(|ts| {
-        let dt = ts
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()
-            .and_then(|d| Utc.timestamp_opt(d.as_secs() as i64, 0).single());
-        dt.map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
-    })
 }
 
 #[cfg(test)]
@@ -270,6 +197,7 @@ mod tests {
         let state = AppState {
             engine: Arc::new(engine),
             started_at: Instant::now(),
+            latest_changeset_cache: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         (dir, state)
@@ -281,6 +209,7 @@ mod tests {
         let state = AppState {
             engine: Arc::new(engine),
             started_at: Instant::now(),
+            latest_changeset_cache: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         (dir, state)
@@ -296,28 +225,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tip() {
+    async fn test_latest() {
         let (_dir, state) = setup_state();
-        let response = get_tip(State(state)).await.0;
+        let response = get_latest(State(state)).await.expect("latest").0;
         assert_eq!(response.latest_changeset_id, 2);
-        assert_eq!(response.earliest_changeset_id, 1);
-        assert_eq!(response.total_changesets, 2);
-        assert_eq!(response.data_through, "2024-05-02T12:00:00Z");
-        assert!(!response.last_updated.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_coverage() {
-        let (_dir, state) = setup_state();
-        let response = get_coverage(State(state)).await.0;
-        assert_eq!(response.total_changesets, 2);
-        assert_eq!(response.temporal.start, "2024-05-01T00:00:00Z");
-        assert_eq!(response.temporal.end, "2024-05-02T12:00:00Z");
-        assert_eq!(response.partitions.len(), 1);
-        assert_eq!(response.partitions[0].year, 2024);
-        assert_eq!(response.partitions[0].month, 5);
-        assert_eq!(response.partitions[0].count, 2);
-        assert!(response.partitions[0].file_size_mb > 0.0);
+        assert_eq!(response.created_at, "2024-05-02T12:00:00Z");
+        assert_eq!(response.closed_at, "");
+        assert!(response.open);
     }
 
     #[tokio::test]
@@ -330,23 +244,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tip_empty() {
+    async fn test_latest_empty() {
         let (_dir, state) = setup_empty_state();
-        let response = get_tip(State(state)).await.0;
+        let response = get_latest(State(state)).await.expect("latest").0;
         assert_eq!(response.latest_changeset_id, 0);
-        assert_eq!(response.earliest_changeset_id, 0);
-        assert_eq!(response.total_changesets, 0);
-        assert_eq!(response.data_through, "");
-        assert_eq!(response.last_updated, "");
-    }
-
-    #[tokio::test]
-    async fn test_coverage_empty() {
-        let (_dir, state) = setup_empty_state();
-        let response = get_coverage(State(state)).await.0;
-        assert_eq!(response.total_changesets, 0);
-        assert_eq!(response.temporal.start, "");
-        assert_eq!(response.temporal.end, "");
-        assert!(response.partitions.is_empty());
+        assert_eq!(response.created_at, "");
+        assert_eq!(response.closed_at, "");
+        assert!(!response.open);
     }
 }
