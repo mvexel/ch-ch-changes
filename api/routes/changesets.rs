@@ -333,6 +333,20 @@ pub async fn get_changesets_by_date_range(
         }
     };
 
+    // Safety limit: Maximum 7-day date range to prevent OOM
+    const MAX_DAYS: i64 = 7;
+    let days_diff = (end_date - start_date).num_days();
+    if days_diff > MAX_DAYS {
+        return ApiError::bad_request_with_details(
+            "Date range too large",
+            format!(
+                "Requested {} days, but maximum allowed is {} days. Please use a smaller date range or pagination.",
+                days_diff, MAX_DAYS
+            ),
+        )
+        .into_response();
+    }
+
     // Streaming mode
     if params.stream.unwrap_or(false) {
         if !STREAMING_ENABLED {
@@ -359,7 +373,21 @@ pub async fn get_changesets_by_date_range(
         &end_date.to_rfc3339(),
         &params.to_filters(),
     ) {
-        Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
+        Ok(changesets) => {
+            // Safety limit: Check result set size to prevent OOM
+            const MAX_RESULT_SIZE: usize = 100_000;
+            if changesets.len() > MAX_RESULT_SIZE {
+                return ApiError::bad_request_with_details(
+                    "Result set too large",
+                    format!(
+                        "Query returned {} changesets, but maximum allowed is {}. Please use a smaller date range, add filters (user, uid, open), or use pagination (limit/offset).",
+                        changesets.len(), MAX_RESULT_SIZE
+                    ),
+                )
+                .into_response();
+            }
+            format_response(&changesets, params.format.as_deref(), false)
+        }
         Err(e) => {
             tracing::error!("Query error: {}", e);
             ApiError::internal_error("Database query failed").into_response()
