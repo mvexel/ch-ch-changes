@@ -9,3 +9,9 @@ hetzner-config.env
 *.osm
 
 results/
+
+.env
+.env.Local
+
+
+data/
