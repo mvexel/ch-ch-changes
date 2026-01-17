@@ -32,7 +32,7 @@ pub struct QueryParams {
 
 // Streaming is disabled due to severe performance/oom issues under load.
 // Keep the code paths in place for a future revisit with proper isolation.
-const STREAMING_ENABLED: bool = false;
+const STREAMING_ENABLED: bool = true;
 
 impl QueryParams {
     fn to_filters(&self) -> QueryFilters {
@@ -206,9 +206,9 @@ pub async fn get_changesets_by_day(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
-        if !STREAMING_ENABLED {
-            return streaming_disabled_response();
-        }
+        // if !STREAMING_ENABLED {
+        //     return streaming_disabled_response();
+        // }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let start_str = start.to_rfc3339();
@@ -284,9 +284,9 @@ pub async fn get_changesets_by_id_range(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
-        if !STREAMING_ENABLED {
-            return streaming_disabled_response();
-        }
+        // if !STREAMING_ENABLED {
+        //     return streaming_disabled_response();
+        // }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let filters = params.to_filters();
@@ -361,9 +361,9 @@ pub async fn get_changesets_by_date_range(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
-        if !STREAMING_ENABLED {
-            return streaming_disabled_response();
-        }
+        // if !STREAMING_ENABLED {
+        //     return streaming_disabled_response();
+        // }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let start = start_date.to_rfc3339();
@@ -465,9 +465,9 @@ pub async fn get_changesets_by_hour(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
-        if !STREAMING_ENABLED {
-            return streaming_disabled_response();
-        }
+        // if !STREAMING_ENABLED {
+        //     return streaming_disabled_response();
+        // }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let start_str = start.to_rfc3339();
@@ -566,9 +566,9 @@ pub async fn get_changesets_by_minute(
 
     // Streaming mode
     if params.stream.unwrap_or(false) {
-        if !STREAMING_ENABLED {
-            return streaming_disabled_response();
-        }
+        // if !STREAMING_ENABLED {
+        //     return streaming_disabled_response();
+        // }
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let engine = state.engine.clone();
         let start_str = start.to_rfc3339();
