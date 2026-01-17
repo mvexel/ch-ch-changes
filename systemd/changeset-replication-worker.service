@@ -1,0 +1,39 @@
+[Unit]
+Description=OSM Changeset Replication Worker
+Documentation=https://codeberg.org/mvexel/changesets-to-parquet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=changeset
+Group=changeset
+WorkingDirectory=/opt/changeset-server
+
+# Environment variables
+Environment="DATA_PATH=/opt/changeset-data/changesets"
+Environment="POLL_INTERVAL_SECONDS=60"
+Environment="CHANGESET_REPLICATION_URL=https://planet.openstreetmap.org/replication/changesets/"
+Environment="HOME=/var/lib/changeset-replication-worker"
+
+# Binary location
+ExecStart=/opt/changeset-server/bin/changeset-replication-worker
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/changeset-data /var/lib/changeset-replication-worker
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=changeset-replication-worker
+
+[Install]
+WantedBy=multi-user.target
