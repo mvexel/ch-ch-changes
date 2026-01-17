@@ -32,43 +32,60 @@ impl PartitionResolver {
         let root = PathBuf::from(index_path);
         let mut partitions_by_key: HashMap<(u32, u32), Vec<PartitionInfo>> = HashMap::new();
         let mut partitions_by_path = HashMap::new();
-        let mut has_id_index = false;
+        let mut has_id_index = true;
 
-        if let Some(partitions) = load_partition_stats_index(&root) {
-            for info in partitions {
-                has_id_index = true;
-                partitions_by_key
-                    .entry((info.year, info.month))
-                    .or_default()
-                    .push(info.clone());
-                partitions_by_path.insert(info.path.clone(), info);
+        let base = root.join("base");
+        let delta = root.join("delta");
+        let roots = if base.exists() || delta.exists() {
+            let mut roots = Vec::new();
+            if base.exists() {
+                roots.push(base);
             }
+            if delta.exists() {
+                roots.push(delta);
+            }
+            roots
         } else {
-            let files = list_parquet_files(&root);
-            for path in files {
-                let (year, month) = match parse_partition_key(&path) {
-                    Some(value) => value,
-                    None => continue,
-                };
+            vec![root.clone()]
+        };
 
-                let file_size_bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                let info = PartitionInfo {
-                    path: path.to_string_lossy().to_string(),
-                    year,
-                    month,
-                    changeset_count: 0,
-                    min_id: 0,
-                    max_id: 0,
-                    min_timestamp: 0,
-                    max_timestamp: 0,
-                    file_size_bytes,
-                };
+        for root_dir in roots {
+            if let Some(partitions) = load_partition_stats_index(&root_dir) {
+                for info in partitions {
+                    partitions_by_key
+                        .entry((info.year, info.month))
+                        .or_default()
+                        .push(info.clone());
+                    partitions_by_path.insert(info.path.clone(), info);
+                }
+            } else {
+                has_id_index = false;
+                let files = list_parquet_files(&root_dir);
+                for path in files {
+                    let (year, month) = match parse_partition_key(&path) {
+                        Some(value) => value,
+                        None => continue,
+                    };
 
-                partitions_by_key
-                    .entry((year, month))
-                    .or_default()
-                    .push(info.clone());
-                partitions_by_path.insert(info.path.clone(), info);
+                    let file_size_bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    let info = PartitionInfo {
+                        path: path.to_string_lossy().to_string(),
+                        year,
+                        month,
+                        changeset_count: 0,
+                        min_id: 0,
+                        max_id: 0,
+                        min_timestamp: 0,
+                        max_timestamp: 0,
+                        file_size_bytes,
+                    };
+
+                    partitions_by_key
+                        .entry((year, month))
+                        .or_default()
+                        .push(info.clone());
+                    partitions_by_path.insert(info.path.clone(), info);
+                }
             }
         }
 
