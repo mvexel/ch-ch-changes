@@ -66,7 +66,7 @@ echo ""
 
 # Run k6 test
 echo -e "${YELLOW}Starting k6 load test...${NC}"
-echo "This will take approximately 47 minutes (all 3 scenarios)"
+echo "This will take approximately 47 minutes (if all 3 scenarios enabled)"
 echo ""
 echo "Scenarios:"
 echo "  1. Connection Contention (0-17 min)"

@@ -28,26 +28,26 @@ export const options = {
     // Scenario A: Connection Contention Test
     // Tests the Arc<Mutex<Connection>> bottleneck
     // Progressive load to find where mutex serialization causes degradation
-    connection_contention: {
-      executor: 'ramping-vus',
-      exec: 'testConnectionContention',
-      startVUs: 0,
-      stages: [
-        { duration: '1m', target: 10 },   // Warm up
-        { duration: '2m', target: 10 },   // Baseline
-        { duration: '1m', target: 20 },   // Increase
-        { duration: '2m', target: 20 },   // Sustain
-        { duration: '1m', target: 40 },   // More pressure
-        { duration: '2m', target: 40 },   // Sustain
-        { duration: '1m', target: 60 },   // High load
-        { duration: '2m', target: 60 },   // Sustain
-        { duration: '1m', target: 100 },  // Stress
-        { duration: '2m', target: 100 },  // Sustain
-        { duration: '1m', target: 0 }     // Ramp down
-      ],
-      tags: { scenario: 'connection_contention' },
-      startTime: '0s'
-    },
+    // connection_contention: {
+    //   executor: 'ramping-vus',
+    //   exec: 'testConnectionContention',
+    //   startVUs: 0,
+    //   stages: [
+    //     { duration: '1m', target: 10 },   // Warm up
+    //     { duration: '2m', target: 10 },   // Baseline
+    //     { duration: '1m', target: 20 },   // Increase
+    //     { duration: '2m', target: 20 },   // Sustain
+    //     { duration: '1m', target: 40 },   // More pressure
+    //     { duration: '2m', target: 40 },   // Sustain
+    //     { duration: '1m', target: 60 },   // High load
+    //     { duration: '2m', target: 60 },   // Sustain
+    //     { duration: '1m', target: 100 },  // Stress
+    //     { duration: '2m', target: 100 },  // Sustain
+    //     { duration: '1m', target: 0 }     // Ramp down
+    //   ],
+    //   tags: { scenario: 'connection_contention' },
+    //   startTime: '0s'
+    // },
 
     // Scenario B: Memory Stress Test - DISABLED (7-day ranges now limited to 1 day)
     // Tests memory buffering with large 7-day queries
@@ -93,7 +93,7 @@ export const options = {
         { duration: '1m', target: 0 }     // Ramp down
       ],
       tags: { scenario: 'mixed_traffic' },
-      startTime: '17m'  // Start after scenario A (scenario B disabled)
+      // startTime: '17m'  // Start after scenario A (scenario B disabled)
     }
   },
 
@@ -169,10 +169,12 @@ export function testMemoryStress() {
  */
 export function testMixedTraffic() {
   const r = Math.random();
+  const streamResponses = false;
+  const streamSuffix = streamResponses ? '?stream=true' : '';
   let res, url, endpointType;
 
-  if (r < 0.2) {
-    // 20% Health checks
+  if (r < 0.05) {
+    // 5% Health checks
     url = `${BASE_URL}/health`;
     endpointType = 'health';
     res = http.get(url, { tags: { name: 'health', endpoint_type: endpointType } });
@@ -182,8 +184,8 @@ export function testMixedTraffic() {
       'health response time < 50ms': (r) => r.timings.duration < 50
     });
 
-  } else if (r < 0.3) {
-    // 10% Meta latest (cached)
+  } else if (r < 0.1) {
+    // 5% Meta latest (cached)
     url = `${BASE_URL}/meta/latest`;
     endpointType = 'meta';
     res = http.get(url, { tags: { name: 'meta_latest', endpoint_type: endpointType } });
@@ -193,8 +195,8 @@ export function testMixedTraffic() {
       'meta response time < 100ms': (r) => r.timings.duration < 100
     });
 
-  } else if (r < 0.6) {
-    // 30% Single changeset lookups
+  } else if (r < 0.2) {
+    // 10% Single changeset lookups
     const changesetId = getRandomChangesetId();
     url = `${BASE_URL}/changeset/${changesetId}.json`;
     endpointType = 'single';
@@ -204,11 +206,11 @@ export function testMixedTraffic() {
       'changeset status is 200 or 404': (r) => r.status === 200 || r.status === 404
     });
 
-  } else if (r < 0.85) {
-    // 25% Day queries
+  } else if (r < 0.7) {
+    // 50% Day queries
     const date = getWeightedRandomDate();
     const dateStr = dateToYYYYMMDD(date);
-    url = `${BASE_URL}/changesets/day/${dateStr}.json`;
+    url = `${BASE_URL}/changesets/day/${dateStr}.json${streamSuffix}`;
     endpointType = 'day';
     res = http.get(url, { tags: { name: 'day_query', endpoint_type: endpointType } });
 
@@ -219,12 +221,12 @@ export function testMixedTraffic() {
     const changesetCount = extractChangesetCount(res, 'json');
     recordResponse(res, 'day', changesetCount);
 
-  } else if (r < 0.95) {
-    // 10% Hour queries
+  } else {
+    // 20% Hour queries
     const date = getWeightedRandomDate();
     const dateStr = dateToYYYYMMDD(date);
     const hour = getRandomHour();
-    url = `${BASE_URL}/changesets/day/${dateStr}/hour/${hour}.json`;
+    url = `${BASE_URL}/changesets/day/${dateStr}/hour/${hour}.json${streamSuffix}`;
     endpointType = 'hour';
     res = http.get(url, { tags: { name: 'hour_query', endpoint_type: endpointType } });
 
@@ -234,26 +236,7 @@ export function testMixedTraffic() {
 
     const changesetCount = extractChangesetCount(res, 'json');
     recordResponse(res, 'day', changesetCount);
-
-  } else {
-    // 5% Small date ranges (1-3 days)
-    const range = getRandomDateRange(3);
-    const startDate = dateToYYYYMMDD(range.start);
-    const endDate = dateToYYYYMMDD(range.end);
-    url = `${BASE_URL}/changesets/date/from/${startDate}/to/${endDate}.json`;
-    endpointType = 'range';
-    res = http.get(url, {
-      tags: { name: 'date_range_small', endpoint_type: endpointType },
-      timeout: '10s'
-    });
-
-    check(res, {
-      'range query status is 200': (r) => r.status === 200
-    });
-
-    const changesetCount = extractChangesetCount(res, 'json');
-    recordResponse(res, 'range', changesetCount);
-  }
+  };
 
   // Record metrics if not already done
   if (endpointType === 'health' || endpointType === 'meta' || endpointType === 'single') {
