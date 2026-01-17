@@ -18,7 +18,7 @@ changesets-to-parquet --input changesets-latest.osm.bz2 --output changesets.parq
 
 There are additional options for chunk size, partitioning and adding a couple of different indexes to speed up common queries. See `changesets-to-parquet --help` for more. 
 
-You can achieve significant speed-up by using `pbzip2` for multithreaded decompression and piping that into the tool, especially if used with multiple workers (`--workers N`)
+You can achieve significant speed-up by using `pbzip2` for multithreaded decompression and piping that into the tool.
 
 ## Server
 

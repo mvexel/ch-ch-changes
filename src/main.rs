@@ -47,10 +47,6 @@ struct Args {
     /// Continue processing on parse errors (saves what was successfully parsed)
     #[arg(long, default_value_t = false)]
     continue_on_error: bool,
-
-    /// Number of worker threads for parallel writing (default: 1)
-    #[arg(long, default_value_t = 1, hide = true)]
-    workers: usize,
 }
 
 fn main() -> Result<()> {
@@ -70,10 +66,6 @@ fn main() -> Result<()> {
     }
 
     println!("Reading from: {}", args.input);
-    if args.workers > 1 && args.partition {
-        println!("Using {} worker threads for sharded output", args.workers);
-    }
-
     let schema = create_schema();
     
     let (tx, rx) = sync_channel(32);
@@ -126,7 +118,6 @@ fn main() -> Result<()> {
             output_dir.clone(),
             schema.clone(),
             args.batch_size,
-            args.workers,
             index_collector.as_mut(),
         )?;
 

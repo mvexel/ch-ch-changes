@@ -64,16 +64,6 @@ log_info "Output directory: $TEMP_OUTPUT_DIR"
 
 START_TIME=$(date +%s)
 
-# Detect CPU cores for parallelism
-#
-# DISABLED for now - memory issues with multiple workers keeping track of multiple partitions at a time
-# unresolved for now and may not be needed at all
-#
-# CORES=$(nproc)
-# Reserve one core for decompression/parsing
-# WORKERS=$((CORES > 1 ? CORES - 1 : 1))
-log_info "Using $WORKERS worker threads (detected $CORES cores)"
-
 # Construct command
 # We pipe pbzip2 output directly to the tool for maximum performance
 PROCESS_CMD=(changesets-to-parquet \
@@ -81,8 +71,7 @@ PROCESS_CMD=(changesets-to-parquet \
     --output-dir "$TEMP_OUTPUT_DIR" \
     --partition \
     --generate-indexes)
-    # --batch-size 100000 \
-    # --workers "$WORKERS")
+    # --batch-size 100000)
 
 # Force line-buffered output so remote log tailing stays responsive.
 if command -v stdbuf >/dev/null 2>&1; then
