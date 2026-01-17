@@ -345,8 +345,8 @@ pub async fn get_changesets_by_date_range(
         }
     };
 
-    // Safety limit: Maximum 7-day date range to prevent OOM
-    const MAX_DAYS: i64 = 7;
+    // Safety limit: Maximum 1-day date range to prevent OOM
+    const MAX_DAYS: i64 = 1;
     let days_diff = (end_date - start_date).num_days();
     if days_diff > MAX_DAYS {
         return ApiError::bad_request_with_details(

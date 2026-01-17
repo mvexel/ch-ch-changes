@@ -49,25 +49,25 @@ export const options = {
       startTime: '0s'
     },
 
-    // Scenario B: Memory Stress Test
+    // Scenario B: Memory Stress Test - DISABLED (7-day ranges now limited to 1 day)
     // Tests memory buffering with large 7-day queries
     // Low concurrency but large result sets
-    memory_stress: {
-      executor: 'ramping-vus',
-      exec: 'testMemoryStress',
-      startVUs: 0,
-      stages: [
-        { duration: '1m', target: 2 },    // Start gentle
-        { duration: '3m', target: 2 },    // Sustain
-        { duration: '1m', target: 5 },    // Increase
-        { duration: '3m', target: 5 },    // Sustain
-        { duration: '1m', target: 10 },   // Push limits
-        { duration: '3m', target: 10 },   // Sustain (likely to cause issues)
-        { duration: '1m', target: 0 }     // Ramp down
-      ],
-      tags: { scenario: 'memory_stress' },
-      startTime: '17m'  // Start after scenario A
-    },
+    // memory_stress: {
+    //   executor: 'ramping-vus',
+    //   exec: 'testMemoryStress',
+    //   startVUs: 0,
+    //   stages: [
+    //     { duration: '1m', target: 2 },    // Start gentle
+    //     { duration: '3m', target: 2 },    // Sustain
+    //     { duration: '1m', target: 5 },    // Increase
+    //     { duration: '3m', target: 5 },    // Sustain
+    //     { duration: '1m', target: 10 },   // Push limits
+    //     { duration: '3m', target: 10 },   // Sustain (likely to cause issues)
+    //     { duration: '1m', target: 0 }     // Ramp down
+    //   ],
+    //   tags: { scenario: 'memory_stress' },
+    //   startTime: '17m'  // Start after scenario A
+    // },
 
     // Scenario C: Mixed Realistic Traffic
     // Simulates production-like request distribution
@@ -93,7 +93,7 @@ export const options = {
         { duration: '1m', target: 0 }     // Ramp down
       ],
       tags: { scenario: 'mixed_traffic' },
-      startTime: '31m'  // Start after scenario B
+      startTime: '17m'  // Start after scenario A (scenario B disabled)
     }
   },
 
