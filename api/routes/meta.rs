@@ -4,17 +4,17 @@
 //!
 //! # Endpoints
 //! - `GET /health` - Health check endpoint
-//! - `GET /meta/latest` - Get the latest changeset info (cached)
+//! - `GET /meta/replication` - Get replication state info
 //!
 //! # Responses
 //! - 200 OK with JSON metadata
 //! - 500 Internal Server Error if metadata unavailable
 
 use crate::models::ApiError;
-use crate::state::{AppState, LatestChangesetCache};
+use crate::state::AppState;
 use crate::API_VERSION;
 use axum::{extract::State, Json};
-use chrono::{SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, NaiveDateTime, SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,11 +29,10 @@ pub struct HealthResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LatestChangesetResponse {
-    pub latest_changeset_id: i64,
-    pub created_at: String,
-    pub closed_at: String,
-    pub open: bool,
+pub struct ReplicationStateResponse {
+    pub sequence: u64,
+    pub last_run: String,
+    pub state_path: String,
 }
 
 /// Health check endpoint
@@ -53,82 +52,23 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     })
 }
 
-/// Get latest changeset information.
-///
-/// Cached on first request to avoid repeated expensive scans. Restart to refresh.
-pub async fn get_latest(
+/// Get replication state information from the local state file.
+pub async fn get_replication_state(
     State(state): State<AppState>,
-) -> Result<Json<LatestChangesetResponse>, ApiError> {
-    if let Some(cached) = state.latest_changeset_cache.read().await.clone() {
-        return Ok(Json(LatestChangesetResponse {
-            latest_changeset_id: cached.latest_changeset_id,
-            created_at: cached.created_at,
-            closed_at: cached.closed_at,
-            open: cached.open,
-        }));
-    }
+) -> Result<Json<ReplicationStateResponse>, ApiError> {
+    let data_path = state.engine.data_path();
+    let (state_path, content) = load_replication_state_file(data_path)
+        .map_err(|e| ApiError::internal_error_with_details("Failed to read replication state", e))?
+        .ok_or_else(|| ApiError::not_found("Replication state not found"))?;
 
-    // Offload blocking DuckDB calls to blocking thread pool
-    let engine = state.engine.clone();
-    let latest_changeset_id = tokio::task::spawn_blocking(move || {
-        engine.get_latest_id().map_err(|e| e.to_string())
-    })
-    .await
-    .unwrap_or_else(|e| {
-        tracing::error!("Task join error: {}", e);
-        Err("Task panicked".to_string())
-    })
-    .map_err(|e| {
-        tracing::error!("Latest changeset id query failed: {}", e);
-        ApiError::internal_error("Failed to query latest changeset")
-    })?;
+    let (sequence, last_run) = parse_replication_state(&content)
+        .map_err(|e| ApiError::internal_error_with_details("Failed to parse replication state", e))?;
 
-    let (created_at, closed_at, open) = if latest_changeset_id > 0 {
-        let engine = state.engine.clone();
-        let changeset_result = tokio::task::spawn_blocking(move || {
-            // Convert error to String to make it Send
-            engine.get_changeset(latest_changeset_id)
-                .map_err(|e| e.to_string())
-        })
-        .await
-        .unwrap_or_else(|e| {
-            tracing::error!("Task join error: {}", e);
-            Err("Task panicked".to_string())
-        });
-
-        match changeset_result {
-            Ok(Some(changeset)) => (
-                format_timestamp_millis(changeset.created_at),
-                format_timestamp_millis(changeset.closed_at),
-                changeset.open,
-            ),
-            Ok(None) => (String::new(), String::new(), false),
-            Err(e) => {
-                tracing::error!("Latest changeset lookup failed: {}", e);
-                return Err(ApiError::internal_error(
-                    "Failed to query latest changeset",
-                ));
-            }
-        }
-    } else {
-        (String::new(), String::new(), false)
-    };
-
-    let response = LatestChangesetResponse {
-        latest_changeset_id,
-        created_at,
-        closed_at,
-        open,
-    };
-
-    *state.latest_changeset_cache.write().await = Some(LatestChangesetCache {
-        latest_changeset_id: response.latest_changeset_id,
-        created_at: response.created_at.clone(),
-        closed_at: response.closed_at.clone(),
-        open: response.open,
-    });
-
-    Ok(Json(response))
+    Ok(Json(ReplicationStateResponse {
+        sequence,
+        last_run,
+        state_path: state_path.to_string_lossy().to_string(),
+    }))
 }
 
 fn list_parquet_files(data_path: &Path) -> Vec<PathBuf> {
@@ -153,15 +93,83 @@ fn collect_parquet_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn format_timestamp_millis(value: Option<i64>) -> String {
-    match value {
-        Some(ts) => Utc
-            .timestamp_millis_opt(ts)
-            .single()
-            .map(|dt| dt.to_rfc3339_opts(SecondsFormat::Secs, true))
-            .unwrap_or_default(),
-        None => String::new(),
+fn load_replication_state_file(data_path: &Path) -> Result<Option<(PathBuf, String)>, String> {
+    let candidates = [
+        data_path.join("delta/state.yaml"),
+        data_path.join("delta/state.txt"),
+        data_path.join("state.yaml"),
+        data_path.join("state.txt"),
+    ];
+
+    for path in candidates {
+        if path.exists() {
+            let content = fs::read_to_string(&path)
+                .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+            return Ok(Some((path, content)));
+        }
     }
+
+    Ok(None)
+}
+
+fn parse_replication_state(content: &str) -> Result<(u64, String), String> {
+    let mut sequence: Option<u64> = None;
+    let mut last_run: Option<DateTime<Utc>> = None;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line == "---" {
+            continue;
+        }
+
+        if let Some(value) = line.strip_prefix("sequence:") {
+            sequence = Some(
+                value
+                    .trim()
+                    .parse::<u64>()
+                    .map_err(|e| format!("Invalid sequence: {}", e))?,
+            );
+        } else if let Some(value) = line.strip_prefix("last_run:") {
+            last_run = Some(parse_replication_timestamp(value).map_err(|e| e.to_string())?);
+        }
+    }
+
+    let sequence = sequence.ok_or_else(|| "Missing sequence in replication state".to_string())?;
+    let last_run = last_run.ok_or_else(|| "Missing last_run in replication state".to_string())?;
+
+    Ok((
+        sequence,
+        last_run.to_rfc3339_opts(SecondsFormat::Secs, true),
+    ))
+}
+
+fn parse_replication_timestamp(value: &str) -> Result<DateTime<Utc>, chrono::ParseError> {
+    let trimmed = value.trim();
+    let formats = [
+        "%Y-%m-%d %H:%M:%S%.f %:z",
+        "%Y-%m-%d %H:%M:%S %:z",
+        "%Y-%m-%d %H:%M:%S%.f %z",
+        "%Y-%m-%d %H:%M:%S %z",
+        "%Y-%m-%dT%H:%M:%S%.f%:z",
+        "%Y-%m-%dT%H:%M:%S%:z",
+    ];
+
+    for format in formats {
+        if let Ok(parsed) = DateTime::parse_from_str(trimmed, format) {
+            return Ok(parsed.with_timezone(&Utc));
+        }
+    }
+
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(parsed.with_timezone(&Utc));
+    }
+
+    if let Ok(parsed) = NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S%.f") {
+        return Ok(Utc.from_utc_datetime(&parsed));
+    }
+
+    DateTime::parse_from_rfc3339(trimmed)
+        .map(|dt| dt.with_timezone(&Utc))
 }
 
 #[cfg(test)]
@@ -219,7 +227,6 @@ mod tests {
         let state = AppState {
             engine: Arc::new(engine),
             started_at: Instant::now(),
-            latest_changeset_cache: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         (dir, state)
@@ -231,7 +238,6 @@ mod tests {
         let state = AppState {
             engine: Arc::new(engine),
             started_at: Instant::now(),
-            latest_changeset_cache: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         (dir, state)
@@ -247,31 +253,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_latest() {
-        let (_dir, state) = setup_state();
-        let response = get_latest(State(state)).await.expect("latest").0;
-        assert_eq!(response.latest_changeset_id, 2);
-        assert_eq!(response.created_at, "2024-05-02T12:00:00Z");
-        assert_eq!(response.closed_at, "");
-        assert!(response.open);
-    }
-
-    #[tokio::test]
     async fn test_health_empty() {
         let (_dir, state) = setup_empty_state();
         let response = health(State(state)).await.0;
         assert_eq!(response.status, "ok");
         assert!(!response.data_loaded);
         assert_eq!(response.partition_count, 0);
-    }
-
-    #[tokio::test]
-    async fn test_latest_empty() {
-        let (_dir, state) = setup_empty_state();
-        let response = get_latest(State(state)).await.expect("latest").0;
-        assert_eq!(response.latest_changeset_id, 0);
-        assert_eq!(response.created_at, "");
-        assert_eq!(response.closed_at, "");
-        assert!(!response.open);
     }
 }

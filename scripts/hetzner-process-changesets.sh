@@ -54,6 +54,7 @@ SSH_KEY_NAME="${SSH_KEY_NAME:-changeset-processor}"
 DEST_DATA_DIR="${DEST_DATA_DIR:-/opt/changeset-data/changesets}"
 LOG_FILE="${LOG_FILE:-/var/log/changeset-hetzner-$(date +%Y%m%d-%H%M%S).log}"
 REPO_DIR="${REPO_DIR:-/opt/changeset-app}"
+REPLICATION_WORKER_BIN="${REPLICATION_WORKER_BIN:-$REPO_DIR/target/release/changeset-replication-worker}"
 
 # Create log directory
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -326,6 +327,15 @@ if rsync -avz --progress \
 else
     log "ERROR: rsync failed!"
     exit 1
+fi
+
+# Bootstrap replication state from parquet (if worker binary is available)
+if [ -x "$REPLICATION_WORKER_BIN" ]; then
+    log "Bootstrapping replication state from parquet..."
+    DATA_PATH="$DEST_DATA_DIR" "$REPLICATION_WORKER_BIN" --bootstrap-state-from-parquet >> "$LOG_FILE" 2>&1 || \
+        log "WARNING: Failed to bootstrap replication state (see log for details)"
+else
+    log "WARNING: Replication worker binary not found at $REPLICATION_WORKER_BIN"
 fi
 
 # Delete server

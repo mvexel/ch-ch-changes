@@ -668,7 +668,6 @@ mod tests {
         let state = AppState {
             engine: Arc::new(engine),
             started_at: Instant::now(),
-            latest_changeset_cache: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         (dir, state)

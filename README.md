@@ -28,6 +28,11 @@ Run with
 DATA_PATH=/opt/changeset-data/changesets .changeset-server
 ```
 
+## Replication Worker
+
+To keep data fresh between full refreshes, use the minutely replication worker. See
+`docs/REPLICATION_WORKER.md` for setup and systemd instructions.
+
 ### Endpoints
 
 - `GET /health - Health check`
@@ -35,7 +40,7 @@ DATA_PATH=/opt/changeset-data/changesets .changeset-server
 - `GET /changesets/day/{YYYYMMDD}` - All changesets on a date
 - `GET /changesets/day/{YYYYMMDD}/hour/{HH}/[minute/{MM}]` - All changesets on a date and time.
 - `GET /changesets/from/{start}/to/{end}` - Date range (only handles entire days) response can be huge!
-- `GET /meta/latest` - Latest changeset ID with open/close timestamps
+- `GET /meta/replication` - Replication state (sequence + last_run)
 
 ## Geoparquet?
 
