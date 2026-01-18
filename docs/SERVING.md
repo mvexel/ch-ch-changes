@@ -1,16 +1,5 @@
 # Hosting the Changeset Server
 
-A guide to hosting the changeset server on a VPS using native deployment (no Docker). This approach offers better performance, simpler debugging, and easier resource management for this single-binary Rust application.
-
-## Why Native Deployment?
-
-For this application, native deployment has several advantages:
-- **Performance**: No Docker overhead for file I/O when serving large parquet files
-- **Simplicity**: One binary, one systemd service, straightforward debugging
-- **Resource efficiency**: Direct access to system resources without container layers
-- **Easy recovery**: systemd handles automatic restarts and lifecycle management
-- **Transparent monitoring**: Direct access to processes, logs, and system tools
-
 ## Prerequisites
 
 - VPS with Ubuntu 20.04+ or similar (Hetzner CPX31 recommended: 4 vCPU, 8GB RAM, 160GB disk)
@@ -20,32 +9,13 @@ For this application, native deployment has several advantages:
 
 ## Quick Start
 
-For the impatient, here's the TL;DR:
-
-```bash
-# On your VPS
-git clone https://codeberg.org/mvexel/changesets-to-parquet.git
-cd changesets-to-parquet
-sudo ./scripts/setup.sh
-
-# Copy your parquet files to /data/parquet
-# Then restart: sudo systemctl restart changeset-server
-```
-
-## Detailed Setup
-
 ### Step 1: Prepare the Server
 
-SSH into your server and update the system:
+SSH into your server, update the system, and install deps & rust:
 
 ```bash
-# Update system packages
 sudo apt update && sudo apt upgrade -y
-
-# Install required dependencies
 sudo apt install -y build-essential pkg-config libssl-dev curl git
-
-# Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source $HOME/.cargo/env
 ```
@@ -57,6 +27,30 @@ cd /tmp
 git clone https://codeberg.org/mvexel/changesets-to-parquet.git
 cd changesets-to-parquet
 ```
+
+### Configure
+
+Edit the systemd service definition.
+
+- `OSM_OAUTH_CLIENT_ID` - OSM OAuth2 client ID
+- `OSM_OAUTH_CLIENT_SECRET` - OSM OAuth2 client secret
+- `OSM_OAUTH_REDIRECT_URL` - e.g. `https://changesets.yourdomain.com/auth/osm/callback`
+- `AUTH_KEY_SECRET` - random secret used to hash API keys (create with `openssl rand -hex 32`)
+- `AUTH_DB_PATH` - path to the local SQLite auth DB (e.g. `/var/lib/changeset-server/auth.sqlite`)
+
+Optional overrides:
+
+- `DATA_PATH` - changeset parquet data root path.
+- `RUST_LOG` - Rust log level
+- `HOME` - binary home dir
+- `AUTH_DEFAULT_DAILY_LIMIT` - default daily request limit for new users (omit or `0` for unlimited)
+- `AUTH_DEFAULT_MONTHLY_LIMIT` - default monthly request limit for new users (omit or `0` for unlimited)
+- `OSM_OAUTH_SCOPE` (default: `read_prefs`)
+- `OSM_OAUTH_AUTHORIZE_URL`
+- `OSM_OAUTH_TOKEN_URL`
+- `OSM_OAUTH_USER_DETAILS_URL`
+
+To set per-user limits later, update the local SQLite DB directly
 
 ### Step 3: Run the Setup Script
 
@@ -70,45 +64,9 @@ The setup script will:
 sudo ./scripts/setup.sh
 ```
 
-### Step 4: Add Your Data
+### Step 4: Initial data seed
 
-Copy your parquet files to the data directory:
-
-```bash
-# Example: Copy from local machine
-scp changesets_*.parquet your-server:/data/parquet/
-
-# Or process on the server
-# See "Initial Data Load" section below
-```
-
-### Authentication Configuration
-
-The API now requires OSM OAuth2 and API keys for data endpoints. Configure these environment variables in your systemd service (or a drop-in):
-
-- `OSM_OAUTH_CLIENT_ID` - OSM OAuth2 client ID
-- `OSM_OAUTH_CLIENT_SECRET` - OSM OAuth2 client secret
-- `OSM_OAUTH_REDIRECT_URL` - e.g. `https://changesets.yourdomain.com/auth/osm/callback`
-- `AUTH_KEY_SECRET` - random secret used to hash API keys
-- `AUTH_DB_PATH` - path to the local SQLite auth DB (e.g. `/var/lib/changeset-server/auth.sqlite`)
-- `AUTH_DEFAULT_DAILY_LIMIT` - default daily request limit for new users (omit or `0` for unlimited)
-- `AUTH_DEFAULT_MONTHLY_LIMIT` - default monthly request limit for new users (omit or `0` for unlimited)
-
-Optional overrides:
-
-- `OSM_OAUTH_SCOPE` (default: `read_prefs`)
-- `OSM_OAUTH_AUTHORIZE_URL`
-- `OSM_OAUTH_TOKEN_URL`
-- `OSM_OAUTH_USER_DETAILS_URL`
-
-Generate a secret with: `openssl rand -hex 32`
-
-To set per-user limits later, update the local SQLite DB (example sets 5k/day and 100k/month for OSM uid 12345):
-
-```bash
-sqlite3 /var/lib/changeset-server/auth.sqlite \
-  "UPDATE users SET daily_limit=5000, monthly_limit=100000 WHERE osm_uid=12345;"
-```
+See [HETZNER.md](HETZNER.md) for full instructions.
 
 ### Step 5: Start the Service
 
@@ -130,34 +88,17 @@ curl http://localhost:3000/health
 journalctl -u changeset-server -f
 ```
 
-## Initial Data Load
 
-You have two options for getting parquet data:
+### Authentication Configuration
 
-### Option A: Process on the VPS
+
 
 ```bash
-# Download the latest changeset dump
-cd /tmp
-wget https://planet.openstreetmap.org/planet/changesets-latest.osm.bz2
-
-# Build the converter
-cargo build --release --bin changesets-to-parquet
-
-# Process (this will take time and memory)
-./target/release/changesets-to-parquet \
-  --input changesets-latest.osm.bz2 \
-  --output /data/parquet/changesets.parquet
-
-# Restart server to pick up new data
-sudo systemctl restart changeset-server
+sqlite3 /var/lib/changeset-server/auth.sqlite \
+  "UPDATE users SET daily_limit=5000, monthly_limit=100000 WHERE osm_uid=12345;"
 ```
 
-### Option B: Process on Hetzner Cloud (Recommended)
 
-Use ephemeral Hetzner Cloud servers for heavy processing, then sync to VPS. This is more cost-effective for large datasets.
-
-See [HETZNER.md](HETZNER.md) for full instructions.
 
 ## Deployment Operations
 
@@ -540,16 +481,6 @@ Since the server is read-only (serving parquet files):
 2. **Backup configuration**: Keep deployment scripts and service files in git
 
 3. **Document procedures**: Keep this guide updated with any custom changes
-
-## Migration from Docker
-
-If you're migrating from a Docker-based deployment:
-
-1. Stop the Docker containers
-2. Copy parquet data to `/data/parquet`
-3. Run the native setup script
-4. Update your reverse proxy to point to the new setup
-5. Remove old Docker volumes/images when confident
 
 ## Useful Commands Reference
 

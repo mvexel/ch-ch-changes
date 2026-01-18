@@ -24,20 +24,20 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # Step 1: Build the release binary
-echo -e "\n${YELLOW}[1/7] Building release binary...${NC}"
+echo -e "\n${YELLOW}[1/8] Building release binary...${NC}"
 cargo build --release --bin changeset-server
 
 # Step 2: Create release directory
-echo -e "\n${YELLOW}[2/7] Creating release directory...${NC}"
+echo -e "\n${YELLOW}[2/8] Creating release directory...${NC}"
 mkdir -p "$RELEASE_DIR"
 
 # Step 3: Copy binary to release directory
-echo -e "\n${YELLOW}[3/7] Copying binary...${NC}"
+echo -e "\n${YELLOW}[3/8] Copying binary...${NC}"
 cp target/release/changeset-server "$RELEASE_DIR/"
 chmod +x "$RELEASE_DIR/changeset-server"
 
 # Step 4: Test the binary
-echo -e "\n${YELLOW}[4/7] Testing binary...${NC}"
+echo -e "\n${YELLOW}[4/8] Testing binary...${NC}"
 if [ ! -x "$RELEASE_DIR/changeset-server" ]; then
     echo -e "${RED}Error: Binary is not executable${NC}"
     exit 1
@@ -49,17 +49,20 @@ if ! file "$RELEASE_DIR/changeset-server" | grep -q "ELF.*executable"; then
 fi
 echo "Binary check passed"
 
+echo -e "\n${YELLOW}[5/8] Stopping service...${NC}"
+sudo systemctl stop changeset-server
+
 # Step 5: Update symlinks
-echo -e "\n${YELLOW}[5/7] Updating symlinks...${NC}"
+echo -e "\n${YELLOW}[6/8] Updating symlinks...${NC}"
 ln -sfn "$RELEASE_DIR" "$DEPLOY_DIR/releases/current"
 ln -sfn "$DEPLOY_DIR/releases/current/changeset-server" "$DEPLOY_DIR/bin/changeset-server"
 
 # Step 6: Restart service
-echo -e "\n${YELLOW}[6/7] Restarting service...${NC}"
-sudo systemctl restart changeset-server
+echo -e "\n${YELLOW}[7/8] Restarting service...${NC}"
+sudo systemctl start changeset-server
 
 # Step 7: Health check
-echo -e "\n${YELLOW}[7/7] Running health checks...${NC}"
+echo -e "\n${YELLOW}[8/8] Running health checks...${NC}"
 sleep 3
 
 if systemctl is-active --quiet changeset-server; then

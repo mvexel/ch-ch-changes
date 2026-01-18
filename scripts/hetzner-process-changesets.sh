@@ -22,7 +22,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  -f, --follow-logs      Stream Docker logs during processing"
+            echo "  -f, --follow-logs      Stream logs during processing"
             echo "  -k, --keep-on-failure  Keep server alive for 30min on failure"
             echo "  -h, --help            Show this help"
             echo ""
@@ -55,6 +55,8 @@ DEST_DATA_DIR="${DEST_DATA_DIR:-/opt/changeset-data/changesets}"
 LOG_FILE="${LOG_FILE:-/var/log/changeset-hetzner-$(date +%Y%m%d-%H%M%S).log}"
 REPO_DIR="${REPO_DIR:-/opt/changeset-app}"
 REPLICATION_WORKER_BIN="${REPLICATION_WORKER_BIN:-$REPO_DIR/target/release/changeset-replication-worker}"
+CHANGESET_TO_PARQUET_BIN="${CHANGESET_TO_PARQUET_BIN:-$REPO_DIR/target/release/changesets-to-parquet}"
+PROCESS_SCRIPT="${PROCESS_SCRIPT:-$REPO_DIR/scripts/process_changesets.sh}"
 
 # Create log directory
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -132,7 +134,7 @@ CREATE_RESPONSE=$(curl -s -X POST \
             \"purpose\": \"changeset-processing\",
             \"ephemeral\": \"true\"
         },
-        \"user_data\": \"#!/bin/bash\nset -e\napt-get update\napt-get install -y docker.io\nmkdir -p /data/changesets /app\nchown ubuntu:ubuntu /app /data\"
+        \"user_data\": \"#!/bin/bash\nset -e\napt-get update\nmkdir -p /data/changesets /app\nchown ubuntu:ubuntu /app /data\"
     }" \
     "https://api.hetzner.cloud/v1/servers")
 
@@ -213,33 +215,48 @@ for i in {1..60}; do
     sleep 10
 done
 
-# Copy code to server
-log "[5/7] Copying source code to server..."
+# Verify binary exists
+if [ ! -f "$CHANGESET_TO_PARQUET_BIN" ]; then
+    log "ERROR: Binary not found at $CHANGESET_TO_PARQUET_BIN"
+    log "Build it first: cd $REPO_DIR && cargo build --release --bin changesets-to-parquet"
+    exit 1
+fi
+
+if [ ! -f "$PROCESS_SCRIPT" ]; then
+    log "ERROR: Processing script not found at $PROCESS_SCRIPT"
+    exit 1
+fi
+
+# Copy binary and script to server
+log "[5/7] Copying binary and script to server..."
 PROCESSING_FAILED=false
 if ! rsync -az --progress \
     -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
-    --exclude '.git' \
-    --exclude 'target' \
-    --exclude '_local' \
-    "$REPO_DIR/" \
-    root@$SERVER_IP:/app/ >> "$LOG_FILE" 2>&1; then
-    log "ERROR: Failed to copy code to server"
+    "$CHANGESET_TO_PARQUET_BIN" \
+    root@$SERVER_IP:/usr/local/bin/changesets-to-parquet >> "$LOG_FILE" 2>&1; then
+    log "ERROR: Failed to copy binary to server"
     PROCESSING_FAILED=true
 fi
 
-# Build and run
 if [ "$PROCESSING_FAILED" != true ]; then
-    log "[6/7] Building Docker image on server..."
-    if [ "$FOLLOW_LOGS" = true ]; then
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
-            "cd /app && docker build -f Dockerfile.builder -t changeset-builder:latest ." | tee -a "$LOG_FILE"
-    else
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
-            "cd /app && docker build -f Dockerfile.builder -t changeset-builder:latest . >> /var/log/build.log 2>&1"
+    if ! rsync -az --progress \
+        -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+        "$PROCESS_SCRIPT" \
+        root@$SERVER_IP:/app/process_changesets.sh >> "$LOG_FILE" 2>&1; then
+        log "ERROR: Failed to copy processing script to server"
+        PROCESSING_FAILED=true
     fi
+fi
 
+# Make binary and script executable
+if [ "$PROCESSING_FAILED" != true ]; then
+    log "[6/7] Setting up environment on server..."
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
+        "chmod +x /usr/local/bin/changesets-to-parquet /app/process_changesets.sh && \
+         apt-get update && apt-get install -y wget bzip2 pbzip2 ca-certificates libssl3 > /dev/null 2>&1" >> "$LOG_FILE" 2>&1
+    
     if [ $? -ne 0 ]; then
-        log "ERROR: Docker build failed"
+        log "ERROR: Failed to set up environment"
         PROCESSING_FAILED=true
     fi
 fi
@@ -248,9 +265,9 @@ fi
 if [ "$PROCESSING_FAILED" != true ]; then
     log "[7/7] Starting processing..."
 
-    # Start the processing container in background
+    # Start the processing script in background
     ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
-        "docker run --rm -v /data:/data changeset-builder:latest > /tmp/processing.log 2>&1 && touch /tmp/processing-complete" &
+        "cd /app && ./process_changesets.sh > /tmp/processing.log 2>&1 && touch /tmp/processing-complete" &
 
     # Start log tailing if requested
     if [ "$FOLLOW_LOGS" = true ]; then
@@ -300,7 +317,7 @@ fi
 if [ "$PROCESSING_FAILED" = true ]; then
     log "Fetching logs for debugging..."
     ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
-        "cat /var/log/build.log /tmp/processing.log 2>/dev/null" >> "$LOG_FILE" 2>&1 || true
+        "cat /tmp/processing.log 2>/dev/null" >> "$LOG_FILE" 2>&1 || true
 
     if [ "$KEEP_ON_FAILURE" = true ]; then
         log "Server kept alive for 30 minutes for debugging at: $SERVER_IP"
@@ -351,5 +368,28 @@ log "Data at: $DEST_DATA_DIR"
 log "Duration: $((DURATION / 60)) minutes"
 log "Estimated cost: ~€$(echo "scale=2; 0.045 * $DURATION / 3600" | bc 2>/dev/null || echo 'N/A')"
 log "Log file: $LOG_FILE"
-log ""
-log "Run 'docker compose restart api' to serve the new data."
+
+# Restart changeset server to pick up new data
+if systemctl is-active --quiet changeset-server 2>/dev/null; then
+    log ""
+    log "Restarting changeset-server to pick up new data..."
+    if systemctl restart changeset-server; then
+        log "✓ Service restarted successfully"
+
+        # Wait a moment and verify it's running
+        sleep 2
+        if systemctl is-active --quiet changeset-server; then
+            log "✓ Service is running"
+        else
+            log "WARNING: Service may not have started properly"
+            log "Check status: systemctl status changeset-server"
+        fi
+    else
+        log "ERROR: Failed to restart service"
+        log "Check status: systemctl status changeset-server"
+    fi
+else
+    log ""
+    log "NOTE: changeset-server service not found or not running"
+    log "Restart manually: systemctl restart changeset-server"
+fi
