@@ -1,6 +1,6 @@
 # Deployment Scripts
 
-Scripts for native deployment of the changeset server (no Docker).
+Scripts for native systemd deployment of the changeset server.
 
 ## Scripts
 
