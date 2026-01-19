@@ -8,10 +8,10 @@ set -e  # Exit on error
 set -o pipefail  # Exit on pipe failure
 
 # Configuration
-DOWNLOAD_DIR="/data/downloads"
-TEMP_OUTPUT_DIR="/data/temp_changesets"
-FINAL_OUTPUT_DIR="/data/changesets"
-OLD_OUTPUT_DIR="/data/changesets_old"
+DOWNLOAD_DIR="/opt/changeset-data/downloads"
+TEMP_OUTPUT_DIR="/opt/changeset-data/temp_changesets"
+FINAL_OUTPUT_DIR="/opt/changeset-data/changesets"
+OLD_OUTPUT_DIR="/opt/changeset-data/changesets_old"
 
 # OSM changeset archive URL
 CHANGESET_URL="${CHANGESET_URL:-https://planet.openstreetmap.org/planet/changesets-latest.osm.bz2}"
@@ -26,10 +26,10 @@ log_error() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
 }
 
-# Check volume mount and disk space
-log_info "Checking disk space..."
-df -h /data || log_error "/data mount not found - volume may not be mounted!"
-df -h
+# # Check volume mount and disk space
+# log_info "Checking disk space..."
+# df -h /data || log_error "/data mount not found - volume may not be mounted!"
+# df -h
 
 # Create necessary directories
 log_info "Creating working directories..."
