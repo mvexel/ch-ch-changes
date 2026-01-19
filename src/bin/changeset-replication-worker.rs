@@ -261,7 +261,11 @@ fn main() -> Result<()> {
 
     loop {
         let remote_state = fetch_root_state(&client, &base_url)?;
-        if last_state.sequence_number >= remote_state.sequence_number {
+
+        // OSM changeset replication state files are off-by-one.
+        let mut end_sequence = remote_state.sequence_number + 1;
+
+        if last_state.sequence_number >= end_sequence {
             if args.once {
                 break;
             }
@@ -269,7 +273,6 @@ fn main() -> Result<()> {
             continue;
         }
 
-        let mut end_sequence = remote_state.sequence_number;
         if let Some(max_per_run) = args.max_sequences_per_run {
             end_sequence = end_sequence.min(last_state.sequence_number + max_per_run);
         }
@@ -282,8 +285,13 @@ fn main() -> Result<()> {
             for seq in (last_state.sequence_number + 1)..=end_sequence {
                 log_info(&format!("Fetching sequence {}", seq));
 
-                let seq_state = fetch_sequence_state(&client, &base_url, seq)?
-                    .context("Missing sequence state file")?;
+                let seq_state = match fetch_sequence_state(&client, &base_url, seq)? {
+                    Some(s) => s,
+                    None => {
+                        log_info(&format!("Sequence {} not found (yet), stopping batch.", seq));
+                        break;
+                    }
+                };
 
                 let mut changesets = parse_sequence(&client, &base_url, seq, &temp_root, &args)?;
 
@@ -389,6 +397,13 @@ fn main() -> Result<()> {
             // Original per-sequence mode
             for seq in (last_state.sequence_number + 1)..=end_sequence {
                 log_info(&format!("Processing sequence {}", seq));
+
+                // Check existence first since we might have overshot by one
+                if fetch_sequence_state(&client, &base_url, seq)?.is_none() {
+                    log_info(&format!("Sequence {} not found (yet), stopping.", seq));
+                    break;
+                }
+
                 let seq_state =
                     process_sequence(&client, &base_url, seq, &temp_root, &delta_dir, &args)?;
                 write_state(&state_path, &seq_state)?;
@@ -555,9 +570,25 @@ fn fetch_sequence_state(
         Some(text) => text,
         None => return Ok(None),
     };
-    parse_state(&text)
-        .with_context(|| format!("Failed to parse sequence state at {}", url))
-        .map(Some)
+    let mut state = parse_state(&text)
+        .with_context(|| format!("Failed to parse sequence state at {}", url))?;
+
+    if state.sequence_number != sequence {
+        // OSM changeset replication state files point to the *previous* sequence number (N-1)
+        // while containing the timestamp for the *current* sequence (N).
+        // We accept N-1 as valid but update it to N for our internal tracking.
+        if state.sequence_number == sequence.saturating_sub(1) {
+            state.sequence_number = sequence;
+        } else {
+            log_warn(&format!(
+                "State file for sequence {} claims to be sequence {}. Forcing sequence {}.",
+                sequence, state.sequence_number, sequence
+            ));
+            state.sequence_number = sequence;
+        }
+    }
+
+    Ok(Some(state))
 }
 
 fn parse_timestamp(value: &str) -> Result<DateTime<Utc>> {
@@ -905,6 +936,11 @@ fn sequence_path_parts(sequence: u64) -> (String, String, String) {
 fn log_info(message: &str) {
     let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S");
     println!("[{}] INFO: {}", timestamp, message);
+}
+
+fn log_warn(message: &str) {
+    let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S");
+    println!("[{}] WARN: {}", timestamp, message);
 }
 
 /// Parse a sequence and return the changesets without writing to disk
