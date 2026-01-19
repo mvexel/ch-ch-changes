@@ -288,7 +288,10 @@ fn main() -> Result<()> {
                 let seq_state = match fetch_sequence_state(&client, &base_url, seq)? {
                     Some(s) => s,
                     None => {
-                        log_info(&format!("Sequence {} not found (yet), stopping batch.", seq));
+                        log_info(&format!(
+                            "Sequence {} not found (yet), stopping batch.",
+                            seq
+                        ));
                         break;
                     }
                 };
@@ -570,8 +573,8 @@ fn fetch_sequence_state(
         Some(text) => text,
         None => return Ok(None),
     };
-    let mut state = parse_state(&text)
-        .with_context(|| format!("Failed to parse sequence state at {}", url))?;
+    let mut state =
+        parse_state(&text).with_context(|| format!("Failed to parse sequence state at {}", url))?;
 
     if state.sequence_number != sequence {
         // OSM changeset replication state files point to the *previous* sequence number (N-1)
