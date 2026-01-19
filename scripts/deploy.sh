@@ -24,17 +24,21 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # Step 1: Build the release binary
-echo -e "\n${YELLOW}[1/8] Building release binary...${NC}"
-cargo build --release --bin changeset-server
+echo -e "\n${YELLOW}[1/8] Building release binaries...${NC}"
+cargo build --release --bin changeset-server --bin changesets-to-parquet --bin changeset-replication-worker
 
 # Step 2: Create release directory
 echo -e "\n${YELLOW}[2/8] Creating release directory...${NC}"
 mkdir -p "$RELEASE_DIR"
 
 # Step 3: Copy binary to release directory
-echo -e "\n${YELLOW}[3/8] Copying binary...${NC}"
+echo -e "\n${YELLOW}[3/8] Copying binaries...${NC}"
 cp target/release/changeset-server "$RELEASE_DIR/"
+cp target/release/changesets-to-parquet "$RELEASE_DIR/"
+cp target/release/changeset-replication-worker "$RELEASE_DIR/"
 chmod +x "$RELEASE_DIR/changeset-server"
+chmod +x "$RELEASE_DIR/changesets-to-parquet"
+chmod +x "$RELEASE_DIR/changeset-replication-worker"
 
 # Step 4: Test the binary
 echo -e "\n${YELLOW}[4/8] Testing binary...${NC}"
@@ -56,6 +60,15 @@ sudo systemctl stop changeset-server
 echo -e "\n${YELLOW}[6/8] Updating symlinks...${NC}"
 ln -sfn "$RELEASE_DIR" "$DEPLOY_DIR/releases/current"
 ln -sfn "$DEPLOY_DIR/releases/current/changeset-server" "$DEPLOY_DIR/bin/changeset-server"
+ln -sfn "$DEPLOY_DIR/releases/current/changesets-to-parquet" "$DEPLOY_DIR/bin/changesets-to-parquet"
+ln -sfn "$DEPLOY_DIR/releases/current/changeset-replication-worker" "$DEPLOY_DIR/bin/changeset-replication-worker"
+
+# Ensure binaries are in PATH
+if [ -d "/usr/local/bin" ]; then
+    echo "Linking binaries to /usr/local/bin..."
+    sudo ln -sf "$DEPLOY_DIR/bin/changesets-to-parquet" /usr/local/bin/changesets-to-parquet
+    sudo ln -sf "$DEPLOY_DIR/bin/changeset-replication-worker" /usr/local/bin/changeset-replication-worker
+fi
 
 # Step 6: Restart service
 echo -e "\n${YELLOW}[7/8] Restarting service...${NC}"
