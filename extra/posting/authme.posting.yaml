@@ -1,5 +1,5 @@
-name: single changeset
-url: $BASE_URL/changeset/50897208.json
+name: auth me
+url: $BASE_URL/auth/me
 auth:
   type: bearer_token
   bearer_token:

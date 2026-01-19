@@ -12,6 +12,7 @@ results/
 
 .env
 .env.local
+prod.env
 
 data/
 
