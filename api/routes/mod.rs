@@ -14,6 +14,7 @@ use axum::{middleware, routing::get, Router};
 pub fn create_router(state: AppState) -> Router {
     let public_routes = Router::new()
         .route("/health", get(meta::health))
+        .route("/meta/state", get(meta::get_replication_state))
         .route("/auth/osm/start", get(auth::routes::oauth_start))
         .route("/auth/osm/callback", get(auth::routes::oauth_callback));
 
@@ -34,7 +35,6 @@ pub fn create_router(state: AppState) -> Router {
             "/changesets/date/from/:start/to/:end",
             get(changesets::get_changesets_by_date_range),
         )
-        .route("/meta/replication", get(meta::get_replication_state))
         .route("/auth/me", get(auth::routes::get_me))
         .layer(middleware::from_fn_with_state(
             state.clone(),

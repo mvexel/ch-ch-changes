@@ -56,7 +56,7 @@
 
     <h3>Data Updates</h3>
 
-    <p>Changeset data is updated weekly using the canonical changeset archive file OSM makes available, and continuously via replication diffs written in hourly batches. Check the <code>/meta/latest</code> endpoint for the latest changeset info.</p>
+    <p>Changeset data is updated weekly using the canonical changeset archive file OSM makes available, and continuously via replication diffs written in hourly batches. Check the <code>/meta/state</code> endpoint for the latest changeset info.</p>
 
     <h2>Authentication</h2>
     <p>All data endpoints require an API key. Get one by logging in via OSM <a href="/auth/osm/start">here</a>. You will be issued a new API key after. Save it; it will not be shown again. Signing in again rotates the key.</p>
@@ -86,8 +86,8 @@ https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
     <p><span class="endpoint">GET /changesets/date/from/{start}/to/{end}</span> - Date range (entire days) <strong>response can be huge!</strong> 🔐</p>
     <pre><code>https://DOMAIN/changesets/date/from/20240101/to/20240131.json</code></pre>
 
-    <p><span class="endpoint">GET /meta/latest</span> - Latest changeset info</p>
-    <pre><code>https://DOMAIN/meta/latest</code></pre>
+    <p><span class="endpoint">GET /meta/state</span> - Replication state info</p>
+    <pre><code>https://DOMAIN/meta/state</code></pre>
 
     <p><span class="endpoint">GET /auth/me</span> - Account limits &amp; usage 🔐</p>
     <pre><code>https://DOMAIN/auth/me</code></pre>

@@ -263,7 +263,7 @@ fn render_key_page(
     <div class="key">{api_key}</div>
     <p class="note">{daily_text} | {monthly_text}</p>
     <h2>Use it in requests</h2>
-    <pre><code>curl -H "Authorization: Bearer {api_key}" https://DOMAIN/changeset/1.json</code></pre>
+    <pre><code>curl -H "Authorization: Bearer {api_key}" https://chch.osm.lol/changeset/1.json</code></pre>
     <p class="note">
         Logging in again will revoke the previous key and issue a new one.
     </p>
