@@ -369,7 +369,7 @@ impl QueryEngine {
         let mut changesets = Vec::new();
 
         while let Some(row) = rows.next()? {
-            changesets.push(serde_duckdb::from_row(&row)?);
+            changesets.push(serde_duckdb::from_row(row)?);
         }
 
         Ok(changesets)
@@ -387,7 +387,7 @@ impl QueryEngine {
         let mut rows = stmt.query([])?;
 
         while let Some(row) = rows.next()? {
-            let changeset = serde_duckdb::from_row(&row)?;
+            let changeset = serde_duckdb::from_row(row)?;
             // Use blocking_send since we're in a sync context
             // If the receiver is dropped, we stop sending
             if tx.blocking_send(changeset).is_err() {

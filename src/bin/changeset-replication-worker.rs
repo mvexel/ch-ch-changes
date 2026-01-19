@@ -379,7 +379,7 @@ fn initialize_state(client: &Client, base_url: &str, args: &Args) -> Result<Repl
             .with_timezone(&Utc);
         let seq = resolve_sequence_for_timestamp(client, base_url, target)?;
         let state = fetch_sequence_state(client, base_url, seq)?
-            .unwrap_or_else(|| ReplicationState {
+            .unwrap_or(ReplicationState {
                 sequence_number: seq,
                 timestamp: target,
             });

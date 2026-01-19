@@ -26,7 +26,7 @@ impl XmlFormatter {
 
     /// Escape XML special characters
     fn escape_xml(s: &str) -> Cow<'_, str> {
-        if s.contains(|c| matches!(c, '&' | '<' | '>' | '"' | '\'')) {
+        if s.contains(['&', '<', '>', '"', '\'']) {
             let mut result = String::with_capacity(s.len() + 10);
             for c in s.chars() {
                 match c {

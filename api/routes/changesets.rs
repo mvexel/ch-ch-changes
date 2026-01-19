@@ -271,7 +271,7 @@ pub async fn get_changesets_by_date_range(
         }
     };
 
-    let end_date = match NaiveDate::parse_from_str(&end_str, "%Y%m%d") {
+    let end_date = match NaiveDate::parse_from_str(end_str, "%Y%m%d") {
         Ok(d) => Utc.from_utc_datetime(&d.and_hms_opt(23, 59, 59).unwrap()),
         Err(_) => {
             return ApiError::bad_request_with_details(
