@@ -158,7 +158,11 @@ impl StreamingFormatter for JsonFormatter {
         )
     }
 
-    fn stream_item(&self, changeset: &Changeset, is_first: bool) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    fn stream_item(
+        &self,
+        changeset: &Changeset,
+        is_first: bool,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let json_changeset = self.to_json_changeset(changeset);
         let item = serde_json::to_string(&json_changeset)?;
         if is_first {

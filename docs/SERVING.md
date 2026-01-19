@@ -274,18 +274,6 @@ To keep your data fresh, schedule regular updates using the `update-data.sh` scr
 - Restarts the service
 - Validates everything works
 
-### Option 1: Using Cron (Simple)
-
-```bash
-# Edit root's crontab
-sudo crontab -e
-
-# Add weekly update on Sundays at 3 AM
-0 3 * * 0 /root/changesets-to-parquet/scripts/update-data.sh >> /var/log/changeset-update.log 2>&1
-```
-
-### Option 2: Using systemd Timers (More robust)
-
 ```bash
 # Create service file
 sudo tee /etc/systemd/system/changeset-update.service > /dev/null << 'EOF'

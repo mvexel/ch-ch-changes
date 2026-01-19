@@ -68,7 +68,7 @@ impl PartitionStats {
         self.changeset_count += other.changeset_count;
         self.min_id = self.min_id.min(other.min_id);
         self.max_id = self.max_id.max(other.max_id);
-        
+
         if let Some(ts) = other.min_timestamp {
             self.min_timestamp = match self.min_timestamp {
                 Some(current) => Some(current.min(ts)),

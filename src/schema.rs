@@ -30,7 +30,7 @@ pub fn create_schema() -> Arc<Schema> {
             DataType::Map(
                 Arc::new(Field::new(
                     "entries",
-                    DataType::Struct(Fields::from(vec![ 
+                    DataType::Struct(Fields::from(vec![
                         Field::new("keys", DataType::Utf8, false),
                         Field::new("values", DataType::Utf8, true),
                     ])),

@@ -131,7 +131,11 @@ pub async fn get_me(
         .usage_for_user(auth_key.user_id, &day, &month)
         .await
         .map_err(|err| {
-            tracing::error!("Failed to load usage for user {}: {}", auth_key.user_id, err);
+            tracing::error!(
+                "Failed to load usage for user {}: {}",
+                auth_key.user_id,
+                err
+            );
             ApiError::internal_error("Failed to load usage")
         })?;
 

@@ -53,19 +53,24 @@ impl PartitionedWriter {
 
     fn get_or_create_writer(&mut self, key: &PartitionKey) -> Result<()> {
         if !self.writers.contains_key(key) {
-            // Legacy structure: year=Y/month=M.parquet
-            let partition_dir = self.output_dir.join(format!("year={}", key.year));
+            // Modern Hive-compatible structure: year=Y/month=M/data.parquet
+            let partition_dir = self
+                .output_dir
+                .join(format!("year={}", key.year))
+                .join(format!("month={:02}", key.month));
             fs::create_dir_all(&partition_dir)?;
-            let file_path = self.output_dir.join(key.legacy_file_path());
-            
+            let file_path = partition_dir.join("data.parquet");
+
             let file = File::create(&file_path)
                 .with_context(|| format!("Failed to create partition file: {:?}", file_path))?;
 
             let writer = ArrowWriter::try_new(file, self.schema.clone(), Some(self.props.clone()))?;
             self.writers.insert(key.clone(), writer);
             // Use small initial capacity - Arrow grows as needed. batch_size only controls flush threshold.
-            self.builders
-                .insert(key.clone(), BatchBuilders::with_capacity(PARTITION_BUILDER_INITIAL_CAPACITY));
+            self.builders.insert(
+                key.clone(),
+                BatchBuilders::with_capacity(PARTITION_BUILDER_INITIAL_CAPACITY),
+            );
             self.partition_counts.insert(key.clone(), 0);
         }
         Ok(())
@@ -146,7 +151,7 @@ pub fn consume_and_write_flat(
 ) -> Result<usize> {
     let mut count = 0;
     let mut batch_num = 0;
-    
+
     let effective_batch_size = batch_size.max(1);
     let mut builders = BatchBuilders::with_capacity(effective_batch_size);
 

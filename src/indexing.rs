@@ -97,7 +97,7 @@ impl IndexCollector {
                     _ => {}
                 }
             }
-            
+
             // Check memory threshold for user stats
             if self.user_stats.len() >= USER_STATS_FLUSH_THRESHOLD {
                 self.flush_user_stats_partial()?;
@@ -115,23 +115,26 @@ impl IndexCollector {
         }
         Ok(())
     }
-    
+
     fn flush_user_stats_partial(&mut self) -> Result<()> {
         if self.user_stats.is_empty() {
             return Ok(());
         }
-        
+
         let indexes_dir = self.output_dir.join("indexes");
         fs::create_dir_all(&indexes_dir)?;
-        
-        let file_path = indexes_dir.join(format!("user_stats_part_{:05}.parquet", self.user_stats_part_count));
+
+        let file_path = indexes_dir.join(format!(
+            "user_stats_part_{:05}.parquet",
+            self.user_stats_part_count
+        ));
         self.user_stats_part_count += 1;
-        
+
         self.write_user_stats_file(&file_path)?;
-        
+
         // Clear memory
         self.user_stats.clear();
-        
+
         Ok(())
     }
 
@@ -196,7 +199,7 @@ impl IndexCollector {
         let batch = RecordBatch::try_new(user_schema, columns)?;
         writer.write(&batch)?;
         writer.close()?;
-        
+
         Ok(())
     }
 
@@ -224,28 +227,30 @@ impl IndexCollector {
 
         Ok(())
     }
-    
+
     fn merge_user_stats_static(output_dir: &PathBuf, part_count: usize) -> Result<()> {
         let indexes_dir = output_dir.join("indexes");
         let final_path = indexes_dir.join("user_stats.parquet");
-        
+
         // If we have no parts, write empty?
         if part_count == 0 {
-             // Just create empty file or skip?
-             // Re-using write_user_stats_file with empty map would work but self is consumed/we are in &self
-             // We can just create an empty file with the schema.
-             // But simpler is to check if we have files.
-             return Ok(());
+            // Just create empty file or skip?
+            // Re-using write_user_stats_file with empty map would work but self is consumed/we are in &self
+            // We can just create an empty file with the schema.
+            // But simpler is to check if we have files.
+            return Ok(());
         }
-        
+
         println!("  Merging {} user stats partitions...", part_count);
-        
+
         let conn = Connection::open_in_memory()?;
-        
+
         // Use glob to read all parts
         let glob_pattern = indexes_dir.join("user_stats_part_*.parquet");
-        let glob_str = glob_pattern.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
-        
+        let glob_str = glob_pattern
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
+
         // Query to merge
         // We take the username from ANY_VALUE (randomly picked, usually last one saw or first)
         // SUM changeset_count
@@ -261,13 +266,13 @@ impl IndexCollector {
                     MAX(last_changeset_at) as last_changeset_at 
                 FROM read_parquet('{}') 
                 GROUP BY uid
-            ) TO '{}' (FORMAT PARQUET, COMPRESSION 'SNAPPY')", 
-            glob_str, 
+            ) TO '{}' (FORMAT PARQUET, COMPRESSION 'SNAPPY')",
+            glob_str,
             final_path.to_str().unwrap()
         );
-        
+
         conn.execute(&query, params![])?;
-        
+
         // Clean up partial files
         for i in 0..part_count {
             let part_path = indexes_dir.join(format!("user_stats_part_{:05}.parquet", i));
@@ -275,9 +280,9 @@ impl IndexCollector {
                 fs::remove_file(part_path)?;
             }
         }
-        
+
         println!("  Index user_stats.parquet merged and ready.");
-        
+
         Ok(())
     }
 }

@@ -1,3 +1,4 @@
+use crate::Changeset;
 use anyhow::Result;
 use arrow::array::{
     ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, MapBuilder, StringBuilder,
@@ -5,7 +6,6 @@ use arrow::array::{
 };
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
-use crate::Changeset;
 use std::sync::Arc;
 
 pub struct BatchBuilders {

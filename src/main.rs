@@ -67,19 +67,21 @@ fn main() -> Result<()> {
 
     println!("Reading from: {}", args.input);
     let schema = create_schema();
-    
+
     let (tx, rx) = sync_channel(32);
     let continue_on_error = args.continue_on_error;
-    
+
     // Determine input source and compression
     let is_stdin = args.input == "-";
     let is_bz2 = args.input.ends_with(".bz2");
-    
+
     let input_source: Box<dyn Read + Send> = if is_stdin {
         Box::new(std::io::stdin())
     } else {
-        Box::new(File::open(&args.input)
-            .with_context(|| format!("Failed to open input file: {}", args.input))?)
+        Box::new(
+            File::open(&args.input)
+                .with_context(|| format!("Failed to open input file: {}", args.input))?,
+        )
     };
 
     // Spawn producer thread
@@ -160,8 +162,7 @@ fn main() -> Result<()> {
 
         println!(
             "Successfully wrote {} changesets to {}",
-            total_count,
-            output
+            total_count, output
         );
     }
 

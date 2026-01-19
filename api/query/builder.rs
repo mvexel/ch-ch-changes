@@ -73,8 +73,7 @@ impl QueryBuilder {
     /// Filter by username
     pub fn filter_user(mut self, username: &str) -> Self {
         let username = escape_sql_literal(username);
-        self.where_clauses
-            .push(format!("user = '{}'", username));
+        self.where_clauses.push(format!("user = '{}'", username));
         self
     }
 

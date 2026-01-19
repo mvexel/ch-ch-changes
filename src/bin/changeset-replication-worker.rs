@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
+use changesets_to_parquet::{
+    parsing::parse_xml_to_channel, schema::create_schema,
+    writer::consume_and_write_partitioned_parallel, Changeset,
+};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Timelike, Utc};
 use clap::Parser;
-use changesets_to_parquet::{
-    parsing::parse_xml_to_channel, schema::create_schema, writer::consume_and_write_partitioned_parallel,
-    Changeset,
-};
 use duckdb::Connection;
 use flate2::read::GzDecoder;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use reqwest::StatusCode;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -16,11 +16,63 @@ use std::sync::mpsc::sync_channel;
 use std::thread;
 use std::time::Duration;
 
+/// Retry network operations with exponential backoff
+fn retry_network<F, T>(mut operation: F) -> Result<T>
+where
+    F: FnMut() -> Result<T>,
+{
+    const MAX_RETRIES: u32 = 3;
+    const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+
+    let mut attempt = 0;
+    let mut backoff = INITIAL_BACKOFF;
+
+    loop {
+        match operation() {
+            Ok(result) => return Ok(result),
+            Err(err) => {
+                // Check if error is retryable
+                let is_retryable = if let Some(reqwest_err) = err.downcast_ref::<reqwest::Error>() {
+                    // Retry on network errors (timeouts, connection failures) and server errors (5xx)
+                    if reqwest_err.is_timeout() || reqwest_err.is_connect() {
+                        true
+                    } else if let Some(status) = reqwest_err.status() {
+                        // Retry on server errors (5xx) but not client errors (4xx)
+                        status.is_server_error()
+                    } else {
+                        // Other reqwest errors (e.g., redirect loop) - don't retry
+                        false
+                    }
+                } else {
+                    // Non-reqwest errors (IO, parsing, etc.) - don't retry
+                    false
+                };
+
+                if !is_retryable || attempt >= MAX_RETRIES {
+                    return Err(err);
+                }
+
+                attempt += 1;
+                log_info(&format!(
+                    "Network error (attempt {}/{}): {}. Retrying in {:?}...",
+                    attempt, MAX_RETRIES, err, backoff
+                ));
+                std::thread::sleep(backoff);
+                backoff *= 2; // Exponential backoff
+            }
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Root data path (contains base/ and delta/ or a flat layout)
-    #[arg(long, env = "DATA_PATH", default_value = "/opt/changeset-data/changesets")]
+    #[arg(
+        long,
+        env = "DATA_PATH",
+        default_value = "/opt/changeset-data/changesets"
+    )]
     data_path: String,
 
     /// Delta output directory (default: DATA_PATH/delta)
@@ -63,9 +115,9 @@ struct Args {
     #[arg(long, default_value_t = false)]
     once: bool,
 
-    /// Initialize local state from existing parquet data and exit
+    /// Disable automatic state bootstrapping from existing parquet files if no state file exists
     #[arg(long, default_value_t = false)]
-    bootstrap_state_from_parquet: bool,
+    no_bootstrap: bool,
 
     /// Batch size for writing records
     #[arg(long, default_value_t = 10000, hide = true)]
@@ -115,8 +167,15 @@ impl BatchAccumulator {
     }
 
     /// Add changesets from a sequence. Returns true if we've crossed an hour boundary.
-    fn add(&mut self, mut changesets: Vec<Changeset>, sequence: u64, sequence_timestamp: DateTime<Utc>) -> bool {
-        let seq_hour = sequence_timestamp.date_naive().and_hms_opt(sequence_timestamp.hour(), 0, 0)
+    fn add(
+        &mut self,
+        mut changesets: Vec<Changeset>,
+        sequence: u64,
+        sequence_timestamp: DateTime<Utc>,
+    ) -> bool {
+        let seq_hour = sequence_timestamp
+            .date_naive()
+            .and_hms_opt(sequence_timestamp.hour(), 0, 0)
             .map(|naive| Utc.from_utc_datetime(&naive));
 
         // Initialize batch_hour on first add
@@ -138,11 +197,6 @@ impl BatchAccumulator {
         }
 
         crossed_hour
-    }
-
-    /// Check if accumulator is empty
-    fn is_empty(&self) -> bool {
-        self.changesets.is_empty()
     }
 
     /// Get the current batch size
@@ -199,14 +253,9 @@ fn main() -> Result<()> {
     let client = build_client()?;
     let base_url = normalize_base_url(&args.replication_url);
 
-    if args.bootstrap_state_from_parquet {
-        bootstrap_state_from_parquet(&client, &base_url, &data_path, &state_path, &delta_dir)?;
-        return Ok(());
-    }
-
     let mut last_state = load_local_state(&state_path)?;
     if last_state.is_none() {
-        last_state = Some(initialize_state(&client, &base_url, &args)?);
+        last_state = Some(initialize_state(&client, &base_url, &args, &data_path)?);
     }
     let mut last_state = last_state.expect("state must be initialized");
 
@@ -255,12 +304,22 @@ fn main() -> Result<()> {
                         seq, hour_str
                     ));
                     let batch = accumulator.take_batch(
-                        seq_state.timestamp.date_naive().and_hms_opt(seq_state.timestamp.hour(), 0, 0)
+                        seq_state
+                            .timestamp
+                            .date_naive()
+                            .and_hms_opt(seq_state.timestamp.hour(), 0, 0)
                             .map(|naive| Utc.from_utc_datetime(&naive))
                             .unwrap(),
-                        seq
+                        seq,
                     );
-                    write_hourly_batch(batch, &delta_dir, &hour_str, &temp_root, args.batch_size, args.keep_temp)?;
+                    write_hourly_batch(
+                        batch,
+                        &delta_dir,
+                        &hour_str,
+                        &temp_root,
+                        args.batch_size,
+                        args.keep_temp,
+                    )?;
                     write_state(&state_path, &state_to_flush)?;
                     last_state = state_to_flush;
 
@@ -287,7 +346,14 @@ fn main() -> Result<()> {
                         args.max_batch_sequences, hour_str
                     ));
                     let batch = accumulator.flush();
-                    write_hourly_batch(batch, &delta_dir, &hour_str, &temp_root, args.batch_size, args.keep_temp)?;
+                    write_hourly_batch(
+                        batch,
+                        &delta_dir,
+                        &hour_str,
+                        &temp_root,
+                        args.batch_size,
+                        args.keep_temp,
+                    )?;
                     write_state(&state_path, &state_to_flush)?;
                     last_state = state_to_flush;
                     accumulator = BatchAccumulator::new(seq + 1);
@@ -308,7 +374,14 @@ fn main() -> Result<()> {
                     accumulator.len()
                 ));
                 let batch = accumulator.flush();
-                write_hourly_batch(batch, &delta_dir, &hour_str, &temp_root, args.batch_size, args.keep_temp)?;
+                write_hourly_batch(
+                    batch,
+                    &delta_dir,
+                    &hour_str,
+                    &temp_root,
+                    args.batch_size,
+                    args.keep_temp,
+                )?;
                 write_state(&state_path, &state_to_flush)?;
                 last_state = state_to_flush;
             }
@@ -316,14 +389,8 @@ fn main() -> Result<()> {
             // Original per-sequence mode
             for seq in (last_state.sequence_number + 1)..=end_sequence {
                 log_info(&format!("Processing sequence {}", seq));
-                let seq_state = process_sequence(
-                    &client,
-                    &base_url,
-                    seq,
-                    &temp_root,
-                    &delta_dir,
-                    &args,
-                )?;
+                let seq_state =
+                    process_sequence(&client, &base_url, seq, &temp_root, &delta_dir, &args)?;
                 write_state(&state_path, &seq_state)?;
                 last_state = seq_state;
             }
@@ -360,10 +427,15 @@ fn sleep_poll(seconds: u64) {
     std::thread::sleep(Duration::from_secs(seconds.max(1)));
 }
 
-fn initialize_state(client: &Client, base_url: &str, args: &Args) -> Result<ReplicationState> {
+fn initialize_state(
+    client: &Client,
+    base_url: &str,
+    args: &Args,
+    data_path: &Path,
+) -> Result<ReplicationState> {
     if let Some(seq) = args.start_sequence {
-        let state = fetch_sequence_state(client, base_url, seq)?
-            .unwrap_or_else(|| ReplicationState {
+        let state =
+            fetch_sequence_state(client, base_url, seq)?.unwrap_or_else(|| ReplicationState {
                 sequence_number: seq,
                 timestamp: Utc::now(),
             });
@@ -378,15 +450,25 @@ fn initialize_state(client: &Client, base_url: &str, args: &Args) -> Result<Repl
             .with_context(|| format!("Invalid start timestamp: {}", ts))?
             .with_timezone(&Utc);
         let seq = resolve_sequence_for_timestamp(client, base_url, target)?;
-        let state = fetch_sequence_state(client, base_url, seq)?
-            .unwrap_or(ReplicationState {
-                sequence_number: seq,
-                timestamp: target,
-            });
+        let state = fetch_sequence_state(client, base_url, seq)?.unwrap_or(ReplicationState {
+            sequence_number: seq,
+            timestamp: target,
+        });
         return Ok(ReplicationState {
             sequence_number: seq.saturating_sub(1),
             timestamp: state.timestamp,
         });
+    }
+
+    if !args.no_bootstrap {
+        if let Some(state) = try_recover_state_from_parquet(client, base_url, data_path)? {
+            log_info(&format!(
+                "Bootstrapped state at sequence {} (timestamp {})",
+                state.sequence_number,
+                state.timestamp.to_rfc3339()
+            ));
+            return Ok(state);
+        }
     }
 
     let latest = fetch_root_state(client, base_url)?;
@@ -402,8 +484,8 @@ fn load_local_state(path: &Path) -> Result<Option<ReplicationState>> {
     }
     let text = fs::read_to_string(path)
         .with_context(|| format!("Failed to read state file at {:?}", path))?;
-    let state = parse_state(&text)
-        .with_context(|| format!("Failed to parse state file at {:?}", path))?;
+    let state =
+        parse_state(&text).with_context(|| format!("Failed to parse state file at {:?}", path))?;
     Ok(Some(state))
 }
 
@@ -439,8 +521,8 @@ fn write_state(path: &Path, state: &ReplicationState) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut file = File::create(path)
-        .with_context(|| format!("Failed to write state file at {:?}", path))?;
+    let mut file =
+        File::create(path).with_context(|| format!("Failed to write state file at {:?}", path))?;
     writeln!(file, "---")?;
     writeln!(
         file,
@@ -459,8 +541,7 @@ fn fetch_root_state(client: &Client, base_url: &str) -> Result<ReplicationState>
     }
 
     let txt_url = format!("{}state.txt", base_url);
-    let text = fetch_text(client, &txt_url)?
-        .context("Root state not found")?;
+    let text = fetch_text(client, &txt_url)?.context("Root state not found")?;
     parse_state(&text).with_context(|| format!("Failed to parse root state at {}", txt_url))
 }
 
@@ -507,29 +588,33 @@ fn parse_timestamp(value: &str) -> Result<DateTime<Utc>> {
     Err(anyhow::anyhow!("Unsupported timestamp format: {}", trimmed))
 }
 
-fn bootstrap_state_from_parquet(
+fn try_recover_state_from_parquet(
     client: &Client,
     base_url: &str,
     data_path: &Path,
-    state_path: &Path,
-    delta_dir: &Path,
-) -> Result<()> {
-    fs::create_dir_all(delta_dir)?;
+) -> Result<Option<ReplicationState>> {
     let mut files = Vec::new();
+
+    // Check for legacy base/ directory structure
     let base_path = data_path.join("base");
     if base_path.exists() {
         collect_parquet_files(&base_path, &mut files)?;
     }
+
+    // Check for delta/ directory
     let delta_path = data_path.join("delta");
     if delta_path.exists() {
         collect_parquet_files(&delta_path, &mut files)?;
     }
 
+    // If no files found in subdirectories, check the root data_path itself
+    // This handles flat Hive-partitioned layouts (year=YYYY/month=MM.parquet)
+    if files.is_empty() && data_path.exists() {
+        collect_parquet_files(data_path, &mut files)?;
+    }
+
     if files.is_empty() {
-        return Err(anyhow::anyhow!(
-            "No parquet files found under {:?}",
-            data_path
-        ));
+        return Ok(None);
     }
 
     let max_ts_millis = max_created_at_from_parquet_files(&files)
@@ -551,13 +636,7 @@ fn bootstrap_state_from_parquet(
         sequence_number: start_seq.saturating_sub(1),
         timestamp,
     };
-    write_state(state_path, &state)?;
-    log_info(&format!(
-        "Bootstrapped state at sequence {} (timestamp {})",
-        state.sequence_number,
-        state.timestamp.to_rfc3339()
-    ));
-    Ok(())
+    Ok(Some(state))
 }
 
 fn max_created_at_from_parquet_files(files: &[PathBuf]) -> Result<i64> {
@@ -580,33 +659,56 @@ fn max_created_at_from_parquet_files(files: &[PathBuf]) -> Result<i64> {
     Err(anyhow::anyhow!("created_at query returned no rows"))
 }
 
+/// Fetch HTTP response with retry for network errors and server errors (5xx)
+/// Returns Ok(None) for 404 Not Found, Ok(Some(Response)) for success (2xx),
+/// Err on other client errors (4xx) or other failures
+fn fetch_response_allow_404(client: &Client, url: &str) -> Result<Option<Response>> {
+    retry_network(|| {
+        let response = client
+            .get(url)
+            .send()
+            .with_context(|| format!("GET {}", url))?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let response = response
+            .error_for_status()
+            .with_context(|| format!("GET {} failed", url))?;
+        Ok(Some(response))
+    })
+}
+
 fn fetch_text(client: &Client, url: &str) -> Result<Option<String>> {
-    let response = client.get(url).send().with_context(|| format!("GET {}", url))?;
-    if response.status() == StatusCode::NOT_FOUND {
-        return Ok(None);
+    match fetch_response_allow_404(client, url)? {
+        Some(response) => response
+            .text()
+            .map(Some)
+            .context("Failed to read response body"),
+        None => Ok(None),
     }
-    let response = response
-        .error_for_status()
-        .with_context(|| format!("GET {} failed", url))?;
-    response.text().map(Some).context("Failed to read response body")
 }
 
 fn download_file(client: &Client, url: &str, dest: &Path) -> Result<()> {
-    let response = client.get(url).send().with_context(|| format!("GET {}", url))?;
-    if response.status() == StatusCode::NOT_FOUND {
-        return Err(anyhow::anyhow!("Remote file not found: {}", url));
-    }
-    let mut response = response
-        .error_for_status()
-        .with_context(|| format!("GET {} failed", url))?;
+    let mut response = retry_network(|| {
+        let response = client
+            .get(url)
+            .send()
+            .with_context(|| format!("GET {}", url))?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Err(anyhow::anyhow!("Remote file not found: {}", url));
+        }
+        response
+            .error_for_status()
+            .with_context(|| format!("GET {} failed", url))
+    })?;
 
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
 
     let tmp_path = dest.with_extension("part");
-    let mut file = File::create(&tmp_path)
-        .with_context(|| format!("Failed to create {:?}", tmp_path))?;
+    let mut file =
+        File::create(&tmp_path).with_context(|| format!("Failed to create {:?}", tmp_path))?;
     io::copy(&mut response, &mut file)
         .with_context(|| format!("Failed to write {}", dest.display()))?;
     fs::rename(&tmp_path, dest)
@@ -660,8 +762,8 @@ fn process_sequence(
     delta_dir: &Path,
     args: &Args,
 ) -> Result<ReplicationState> {
-    let seq_state = fetch_sequence_state(client, base_url, sequence)?
-        .context("Missing sequence state file")?;
+    let seq_state =
+        fetch_sequence_state(client, base_url, sequence)?.context("Missing sequence state file")?;
 
     let sequence_dir = temp_root.join(format!("seq-{:09}", sequence));
     if sequence_dir.exists() {
@@ -890,7 +992,8 @@ fn write_hourly_batch(
     }
     drop(tx);
 
-    let (total_count, summary) = writer_handle.join()
+    let (total_count, summary) = writer_handle
+        .join()
         .map_err(|_| anyhow::anyhow!("Writer thread panicked"))??;
 
     log_info(&format!(
@@ -1011,10 +1114,7 @@ mod tests {
         }
 
         let path_sql = escape_sql_string(path);
-        let copy_sql = format!(
-            "COPY changesets TO '{}' (FORMAT PARQUET);",
-            path_sql
-        );
+        let copy_sql = format!("COPY changesets TO '{}' (FORMAT PARQUET);", path_sql);
         conn.execute_batch(&copy_sql)?;
         Ok(())
     }
@@ -1051,7 +1151,10 @@ mod tests {
         assert!(!crossed);
         assert_eq!(acc.sequence_count, 1);
         assert_eq!(acc.len(), 3);
-        assert!(acc.changesets.iter().all(|cs| cs.replication_sequence == Some(100)));
+        assert!(acc
+            .changesets
+            .iter()
+            .all(|cs| cs.replication_sequence == Some(100)));
 
         let crossed = acc.add(changesets, 101, ts2);
         assert!(crossed);
@@ -1076,7 +1179,10 @@ mod tests {
         let conn = Connection::open_in_memory().expect("duckdb");
         let path_sql = escape_sql_string(&existing);
         let mut stmt = conn
-            .prepare(&format!("SELECT COUNT(*) AS cnt FROM read_parquet('{}')", path_sql))
+            .prepare(&format!(
+                "SELECT COUNT(*) AS cnt FROM read_parquet('{}')",
+                path_sql
+            ))
             .expect("prepare");
         let mut rows = stmt.query([]).expect("query");
         let row = rows.next().expect("row").expect("row result");

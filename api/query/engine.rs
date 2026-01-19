@@ -63,9 +63,7 @@ impl QueryEngine {
         pool_size: u32,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let manager = DuckDBConnectionManager;
-        let pool = Pool::builder()
-            .max_size(pool_size)
-            .build(manager)?;
+        let pool = Pool::builder().max_size(pool_size).build(manager)?;
 
         let partition_resolver = PartitionResolver::new(data_path)?;
 
@@ -77,7 +75,9 @@ impl QueryEngine {
     }
 
     /// Get a connection from the pool
-    fn get_conn(&self) -> Result<PooledConnection<DuckDBConnectionManager>, Box<dyn std::error::Error>> {
+    fn get_conn(
+        &self,
+    ) -> Result<PooledConnection<DuckDBConnectionManager>, Box<dyn std::error::Error>> {
         Ok(self.pool.get()?)
     }
 
@@ -87,20 +87,25 @@ impl QueryEngine {
     fn get_glob_patterns(&self) -> Vec<String> {
         let base = self.data_path.join("base");
         let delta = self.data_path.join("delta");
-        
+
         let mut globs = Vec::new();
         if base.exists() {
             globs.push(base.join("**/*.parquet").to_string_lossy().to_string());
         }
         if delta.exists() {
-             globs.push(delta.join("**/*.parquet").to_string_lossy().to_string());
+            globs.push(delta.join("**/*.parquet").to_string_lossy().to_string());
         }
-        
+
         if globs.is_empty() {
-             // Fallback for tests or flat structure (year=YYYY at root)
-             globs.push(self.data_path.join("year=*/**/*.parquet").to_string_lossy().to_string());
+            // Fallback for tests or flat structure (year=YYYY at root)
+            globs.push(
+                self.data_path
+                    .join("year=*/**/*.parquet")
+                    .to_string_lossy()
+                    .to_string(),
+            );
         }
-        
+
         globs
     }
 
@@ -141,7 +146,7 @@ impl QueryEngine {
     }
 
     /// Stream changesets by date range through a channel
-    /// 
+    ///
     /// Unlike `get_changesets_by_date_range`, this method sends each changeset
     /// through the provided channel as it's read, enabling streaming responses.
     pub fn stream_changesets_by_date_range(
@@ -185,7 +190,12 @@ impl QueryEngine {
         filters: &QueryFilters,
     ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
         let mut builder = QueryBuilder::new()
-            .from_parquets(self.get_glob_patterns().iter().map(|s| s.as_str()).collect())
+            .from_parquets(
+                self.get_glob_patterns()
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect(),
+            )
             .filter_user(username)
             .deduplicate();
         builder = self.apply_filters_to_builder(builder, filters, false);
@@ -200,7 +210,11 @@ impl QueryEngine {
         let source = if globs.len() == 1 {
             format!("'{}'", globs[0].replace('"', "''"))
         } else {
-            let list = globs.iter().map(|p| format!("'{}'", p.replace('"', "''"))).collect::<Vec<_>>().join(",");
+            let list = globs
+                .iter()
+                .map(|p| format!("'{}'", p.replace('"', "''")))
+                .collect::<Vec<_>>()
+                .join(",");
             format!("[{}]", list)
         };
 
@@ -226,7 +240,11 @@ impl QueryEngine {
         let source = if globs.len() == 1 {
             format!("'{}'", globs[0].replace('"', "''"))
         } else {
-            let list = globs.iter().map(|p| format!("'{}'", p.replace('"', "''"))).collect::<Vec<_>>().join(",");
+            let list = globs
+                .iter()
+                .map(|p| format!("'{}'", p.replace('"', "''")))
+                .collect::<Vec<_>>()
+                .join(",");
             format!("[{}]", list)
         };
 
@@ -252,7 +270,11 @@ impl QueryEngine {
         let source = if globs.len() == 1 {
             format!("'{}'", globs[0].replace('"', "''"))
         } else {
-            let list = globs.iter().map(|p| format!("'{}'", p.replace('"', "''"))).collect::<Vec<_>>().join(",");
+            let list = globs
+                .iter()
+                .map(|p| format!("'{}'", p.replace('"', "''")))
+                .collect::<Vec<_>>()
+                .join(",");
             format!("[{}]", list)
         };
 
@@ -278,7 +300,11 @@ impl QueryEngine {
         let source = if globs.len() == 1 {
             format!("'{}'", globs[0].replace('"', "''"))
         } else {
-            let list = globs.iter().map(|p| format!("'{}'", p.replace('"', "''"))).collect::<Vec<_>>().join(",");
+            let list = globs
+                .iter()
+                .map(|p| format!("'{}'", p.replace('"', "''")))
+                .collect::<Vec<_>>()
+                .join(",");
             format!("[{}]", list)
         };
 
@@ -359,10 +385,7 @@ impl QueryEngine {
     }
 
     /// Execute a query that returns a list of changesets
-    fn execute_query_sql(
-        &self,
-        query: &str,
-    ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
+    fn execute_query_sql(&self, query: &str) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
         let conn = self.get_conn()?;
         let mut stmt = conn.prepare(query)?;
         let mut rows = stmt.query([])?;
@@ -381,7 +404,8 @@ impl QueryEngine {
         query: &str,
         tx: tokio::sync::mpsc::Sender<Changeset>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let conn = self.get_conn()
+        let conn = self
+            .get_conn()
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
         let mut stmt = conn.prepare(query)?;
         let mut rows = stmt.query([])?;
@@ -526,7 +550,10 @@ mod serde_duckdb {
         // For now, let's try to map field by field.
 
         let id: i64 = row.get("id")?;
-        let replication_sequence: Option<u64> = row.get::<_, i64>("replication_sequence").ok().map(|v| v as u64);
+        let replication_sequence: Option<u64> = row
+            .get::<_, i64>("replication_sequence")
+            .ok()
+            .map(|v| v as u64);
         let created_at = row
             .get::<_, Value>("created_at")
             .ok()
@@ -549,7 +576,7 @@ mod serde_duckdb {
         // Tags handling: Tag field is now converted to JSON string by QueryBuilder
         let tags_json: Option<String> = row.get("tags").ok();
         let tags: HashMap<String, String> = if let Some(json_str) = tags_json {
-             serde_json::from_str(&json_str).unwrap_or_default()
+            serde_json::from_str(&json_str).unwrap_or_default()
         } else {
             HashMap::new()
         };

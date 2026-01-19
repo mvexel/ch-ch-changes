@@ -113,7 +113,11 @@ impl StreamingFormatter for JsonLinesFormatter {
         String::new()
     }
 
-    fn stream_item(&self, changeset: &Changeset, _is_first: bool) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    fn stream_item(
+        &self,
+        changeset: &Changeset,
+        _is_first: bool,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let jsonl_changeset = self.to_jsonl_changeset(changeset);
         let mut line = serde_json::to_string(&jsonl_changeset)?;
         line.push('\n');

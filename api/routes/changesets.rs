@@ -17,7 +17,6 @@ use chrono::{NaiveDate, TimeZone, Utc};
 use serde::Deserialize;
 use std::convert::Infallible;
 
-
 #[derive(Debug, Deserialize)]
 pub struct QueryParams {
     pub format: Option<String>,
@@ -195,7 +194,10 @@ pub async fn get_changesets_by_day(
         Err(_) => {
             return ApiError::bad_request_with_details(
                 "Invalid date format",
-                format!("'{}' is not a valid date. Expected format: YYYYMMDD", date_str),
+                format!(
+                    "'{}' is not a valid date. Expected format: YYYYMMDD",
+                    date_str
+                ),
             )
             .into_response()
         }
@@ -216,7 +218,9 @@ pub async fn get_changesets_by_day(
         let filters = params.to_filters();
 
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = engine.stream_changesets_by_date_range(&start_str, &end_str, &filters, tx) {
+            if let Err(e) =
+                engine.stream_changesets_by_date_range(&start_str, &end_str, &filters, tx)
+            {
                 tracing::error!("Streaming query error: {}", e);
             }
         });
@@ -232,7 +236,8 @@ pub async fn get_changesets_by_day(
     let format_opt = params.format.clone();
 
     let result = tokio::task::spawn_blocking(move || {
-        engine.get_changesets_by_date_range(&start_str, &end_str, &filters)
+        engine
+            .get_changesets_by_date_range(&start_str, &end_str, &filters)
             .map_err(|e| e.to_string())
     })
     .await
@@ -265,7 +270,10 @@ pub async fn get_changesets_by_date_range(
         Err(_) => {
             return ApiError::bad_request_with_details(
                 "Invalid start date format",
-                format!("'{}' is not a valid date. Expected format: YYYYMMDD", start_str),
+                format!(
+                    "'{}' is not a valid date. Expected format: YYYYMMDD",
+                    start_str
+                ),
             )
             .into_response()
         }
@@ -276,7 +284,10 @@ pub async fn get_changesets_by_date_range(
         Err(_) => {
             return ApiError::bad_request_with_details(
                 "Invalid end date format",
-                format!("'{}' is not a valid date. Expected format: YYYYMMDD", end_str),
+                format!(
+                    "'{}' is not a valid date. Expected format: YYYYMMDD",
+                    end_str
+                ),
             )
             .into_response()
         }
@@ -324,7 +335,8 @@ pub async fn get_changesets_by_date_range(
     let format_opt = params.format.clone();
 
     let result = tokio::task::spawn_blocking(move || {
-        engine.get_changesets_by_date_range(&start_str, &end_str, &filters)
+        engine
+            .get_changesets_by_date_range(&start_str, &end_str, &filters)
             .map_err(|e| e.to_string())
     })
     .await
@@ -371,7 +383,10 @@ pub async fn get_changesets_by_hour(
         Err(_) => {
             return ApiError::bad_request_with_details(
                 "Invalid date format",
-                format!("'{}' is not a valid date. Expected format: YYYYMMDD", date_str),
+                format!(
+                    "'{}' is not a valid date. Expected format: YYYYMMDD",
+                    date_str
+                ),
             )
             .into_response()
         }
@@ -412,7 +427,9 @@ pub async fn get_changesets_by_hour(
         let filters = params.to_filters();
 
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = engine.stream_changesets_by_date_range(&start_str, &end_str, &filters, tx) {
+            if let Err(e) =
+                engine.stream_changesets_by_date_range(&start_str, &end_str, &filters, tx)
+            {
                 tracing::error!("Streaming query error: {}", e);
             }
         });
@@ -428,7 +445,8 @@ pub async fn get_changesets_by_hour(
     let format_opt = params.format.clone();
 
     let result = tokio::task::spawn_blocking(move || {
-        engine.get_changesets_by_date_range(&start_str, &end_str, &filters)
+        engine
+            .get_changesets_by_date_range(&start_str, &end_str, &filters)
             .map_err(|e| e.to_string())
     })
     .await
@@ -461,7 +479,10 @@ pub async fn get_changesets_by_minute(
         Err(_) => {
             return ApiError::bad_request_with_details(
                 "Invalid date format",
-                format!("'{}' is not a valid date. Expected format: YYYYMMDD", date_str),
+                format!(
+                    "'{}' is not a valid date. Expected format: YYYYMMDD",
+                    date_str
+                ),
             )
             .into_response()
         }
@@ -513,7 +534,9 @@ pub async fn get_changesets_by_minute(
         let filters = params.to_filters();
 
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = engine.stream_changesets_by_date_range(&start_str, &end_str, &filters, tx) {
+            if let Err(e) =
+                engine.stream_changesets_by_date_range(&start_str, &end_str, &filters, tx)
+            {
                 tracing::error!("Streaming query error: {}", e);
             }
         });
@@ -529,7 +552,8 @@ pub async fn get_changesets_by_minute(
     let format_opt = params.format.clone();
 
     let result = tokio::task::spawn_blocking(move || {
-        engine.get_changesets_by_date_range(&start_str, &end_str, &filters)
+        engine
+            .get_changesets_by_date_range(&start_str, &end_str, &filters)
             .map_err(|e| e.to_string())
     })
     .await
@@ -550,6 +574,7 @@ pub async fn get_changesets_by_minute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::{AuthConfig, AuthState};
     use axum::body::to_bytes;
     use axum::http::StatusCode;
     use duckdb::Connection;
@@ -559,7 +584,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Instant;
     use tempfile::TempDir;
-    use crate::auth::{AuthConfig, AuthState};
 
     async fn setup_state() -> (TempDir, AppState) {
         let dir = TempDir::new().expect("tempdir");

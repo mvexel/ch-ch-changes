@@ -31,19 +31,15 @@ impl AuthConfig {
             .unwrap_or_else(|_| "https://www.openstreetmap.org/oauth2/authorize".to_string());
         let oauth_token_url = env::var("OSM_OAUTH_TOKEN_URL")
             .unwrap_or_else(|_| "https://www.openstreetmap.org/oauth2/token".to_string());
-        let oauth_user_details_url = env::var("OSM_OAUTH_USER_DETAILS_URL")
-            .unwrap_or_else(|_| "https://api.openstreetmap.org/api/0.6/user/details.json".to_string());
-        let oauth_scope =
-            env::var("OSM_OAUTH_SCOPE").unwrap_or_else(|_| "read_prefs".to_string());
+        let oauth_user_details_url = env::var("OSM_OAUTH_USER_DETAILS_URL").unwrap_or_else(|_| {
+            "https://api.openstreetmap.org/api/0.6/user/details.json".to_string()
+        });
+        let oauth_scope = env::var("OSM_OAUTH_SCOPE").unwrap_or_else(|_| "read_prefs".to_string());
 
-        let default_daily_limit =
-            parse_limit(env::var("AUTH_DEFAULT_DAILY_LIMIT").ok()).map_err(|err| {
-                anyhow!("AUTH_DEFAULT_DAILY_LIMIT {}", err)
-            })?;
-        let default_monthly_limit =
-            parse_limit(env::var("AUTH_DEFAULT_MONTHLY_LIMIT").ok()).map_err(|err| {
-                anyhow!("AUTH_DEFAULT_MONTHLY_LIMIT {}", err)
-            })?;
+        let default_daily_limit = parse_limit(env::var("AUTH_DEFAULT_DAILY_LIMIT").ok())
+            .map_err(|err| anyhow!("AUTH_DEFAULT_DAILY_LIMIT {}", err))?;
+        let default_monthly_limit = parse_limit(env::var("AUTH_DEFAULT_MONTHLY_LIMIT").ok())
+            .map_err(|err| anyhow!("AUTH_DEFAULT_MONTHLY_LIMIT {}", err))?;
 
         Ok(Self {
             oauth_client_id,

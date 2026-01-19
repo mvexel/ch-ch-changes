@@ -31,6 +31,7 @@ r2d2 = "0.8"
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls", "json"] }
 
 # API server dependencies
+notify = { version = "6.1", default-features = false, features = ["macos_kqueue"] }
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 tower = "0.4"

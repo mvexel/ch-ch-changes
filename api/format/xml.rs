@@ -176,7 +176,11 @@ impl StreamingFormatter for XmlFormatter {
         header
     }
 
-    fn stream_item(&self, changeset: &Changeset, _is_first: bool) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    fn stream_item(
+        &self,
+        changeset: &Changeset,
+        _is_first: bool,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.format_changeset_element(changeset))
     }
 

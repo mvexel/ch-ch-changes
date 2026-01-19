@@ -42,7 +42,10 @@ impl ApiError {
         }
     }
 
-    pub fn bad_request_with_details(message: impl Into<String>, details: impl Into<String>) -> Self {
+    pub fn bad_request_with_details(
+        message: impl Into<String>,
+        details: impl Into<String>,
+    ) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
@@ -82,7 +85,10 @@ impl ApiError {
         }
     }
 
-    pub fn internal_error_with_details(message: impl Into<String>, details: impl Into<String>) -> Self {
+    pub fn internal_error_with_details(
+        message: impl Into<String>,
+        details: impl Into<String>,
+    ) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: message.into(),

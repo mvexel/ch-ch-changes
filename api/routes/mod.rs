@@ -6,9 +6,9 @@
 pub mod changesets;
 pub mod meta;
 
+use crate::auth;
 use crate::AppState;
 use axum::{middleware, routing::get, Router};
-use crate::auth;
 
 /// Create the main API router with all routes
 pub fn create_router(state: AppState) -> Router {

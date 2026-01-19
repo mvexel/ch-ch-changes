@@ -31,7 +31,11 @@ pub trait StreamingFormatter: Send + Sync {
 
     /// Format a single item for streaming output
     /// `is_first` indicates if this is the first item (useful for comma handling in JSON arrays)
-    fn stream_item(&self, changeset: &Changeset, is_first: bool) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+    fn stream_item(
+        &self,
+        changeset: &Changeset,
+        is_first: bool,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Returns the footer to emit after all items (e.g., closing tags)
     fn stream_footer(&self) -> String;

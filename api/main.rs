@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tower_http::cors::CorsLayer;
 
-mod constants;
 mod auth;
+mod constants;
 mod format;
 mod models;
 mod query;
@@ -46,10 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::error!("Failed to initialize auth state: {}", e);
         e
     })?;
-    tracing::info!(
-        "Auth DB: {}",
-        auth_state.config.db_path.display()
-    );
+    tracing::info!("Auth DB: {}", auth_state.config.db_path.display());
 
     let state = AppState {
         engine: Arc::new(engine),

@@ -61,8 +61,9 @@ pub async fn get_replication_state(
         .map_err(|e| ApiError::internal_error_with_details("Failed to read replication state", e))?
         .ok_or_else(|| ApiError::not_found("Replication state not found"))?;
 
-    let (sequence, last_run) = parse_replication_state(&content)
-        .map_err(|e| ApiError::internal_error_with_details("Failed to parse replication state", e))?;
+    let (sequence, last_run) = parse_replication_state(&content).map_err(|e| {
+        ApiError::internal_error_with_details("Failed to parse replication state", e)
+    })?;
 
     Ok(Json(ReplicationStateResponse {
         sequence,
@@ -168,20 +169,19 @@ fn parse_replication_timestamp(value: &str) -> Result<DateTime<Utc>, chrono::Par
         return Ok(Utc.from_utc_datetime(&parsed));
     }
 
-    DateTime::parse_from_rfc3339(trimmed)
-        .map(|dt| dt.with_timezone(&Utc))
+    DateTime::parse_from_rfc3339(trimmed).map(|dt| dt.with_timezone(&Utc))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::{AuthConfig, AuthState};
     use crate::query::QueryEngine;
     use duckdb::Connection;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Instant;
     use tempfile::TempDir;
-    use crate::auth::{AuthConfig, AuthState};
 
     async fn setup_state() -> (TempDir, AppState) {
         let dir = TempDir::new().expect("tempdir");
