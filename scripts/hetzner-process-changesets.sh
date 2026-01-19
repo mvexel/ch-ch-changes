@@ -49,7 +49,7 @@ fi
 HETZNER_TOKEN="${HETZNER_TOKEN}"
 SERVER_TYPE="${SERVER_TYPE:-ccx33}"  # 8 vCPU, 32GB RAM
 LOCATION="${LOCATION:-nbg1}"  # Nuremberg
-IMAGE="${IMAGE:-ubuntu-22.04}"
+IMAGE="${IMAGE:-ubuntu-24.04}"
 SSH_KEY_NAME="${SSH_KEY_NAME:-changeset-processor}"
 DEST_DATA_DIR="${DEST_DATA_DIR:-/opt/changeset-data/changesets}"
 LOG_FILE="${LOG_FILE:-/var/log/changeset-hetzner-$(date +%Y%m%d-%H%M%S).log}"
@@ -254,7 +254,7 @@ if [ "$PROCESSING_FAILED" != true ]; then
     ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$SERVER_IP \
         "chmod +x /usr/local/bin/changesets-to-parquet /app/process_changesets.sh && \
          apt-get update && apt-get install -y wget bzip2 pbzip2 ca-certificates libssl3 > /dev/null 2>&1" >> "$LOG_FILE" 2>&1
-    
+
     if [ $? -ne 0 ]; then
         log "ERROR: Failed to set up environment"
         PROCESSING_FAILED=true
