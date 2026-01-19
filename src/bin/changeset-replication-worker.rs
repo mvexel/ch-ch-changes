@@ -361,7 +361,7 @@ fn main() -> Result<()> {
             }
 
             // Flush any remaining changesets at end of catch-up
-            if last_seq_state_in_batch.is_some() {
+            if last_seq_state_in_batch.is_some() && accumulator.len() > 0 {
                 let hour_str = accumulator
                     .hour_string()
                     .context("Missing hour string for final flush")?;
