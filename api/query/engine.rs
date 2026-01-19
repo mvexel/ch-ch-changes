@@ -108,32 +108,6 @@ impl QueryEngine {
         &self.data_path
     }
 
-    /// Query a single changeset by ID
-    pub fn get_changeset(&self, id: i64) -> Result<Option<Changeset>, Box<dyn std::error::Error>> {
-        // First try partition resolver (which should be updated to handle delta/base)
-        if let Ok(partitions) = self.partition_resolver.get_partition_for_id(id) {
-            let query = QueryBuilder::new()
-                .from_parquets(partitions.iter().map(|s| s.as_str()).collect())
-                .filter_id_range(id, id)
-                .deduplicate()
-                .build();
-            let mut results = self.execute_query_sql(&query)?;
-            // Because of deduplication, we should get 1 row max per ID
-            return Ok(results.pop());
-        }
-
-        // Fallback to scanning all files (slow but robust)
-        let globs = self.get_glob_patterns();
-        let query = QueryBuilder::new()
-            .from_parquets(globs.iter().map(|s| s.as_str()).collect())
-            .filter_id_range(id, id)
-            .deduplicate()
-            .build();
-        
-        let mut results = self.execute_query_sql(&query)?;
-        Ok(results.pop())
-    }
-
     /// Query changesets by date range
     pub fn get_changesets_by_date_range(
         &self,
@@ -160,33 +134,6 @@ impl QueryEngine {
         let mut builder = QueryBuilder::new()
             .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
             .filter_date_range(&start_str, &end_str)
-            .deduplicate();
-        builder = self.apply_filters_to_builder(builder, filters, true);
-        let query = builder.build();
-        self.execute_query_sql(&query)
-    }
-
-    /// Query changesets by ID range
-    pub fn get_changesets_by_id_range(
-        &self,
-        start_id: i64,
-        end_id: i64,
-        filters: &QueryFilters,
-    ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
-        if start_id > end_id {
-            return Ok(Vec::new());
-        }
-
-        let partitions = self
-            .partition_resolver
-            .get_partitions_for_id_range(start_id, end_id)?;
-        if partitions.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut builder = QueryBuilder::new()
-            .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
-            .filter_id_range(start_id, end_id)
             .deduplicate();
         builder = self.apply_filters_to_builder(builder, filters, true);
         let query = builder.build();
@@ -224,35 +171,6 @@ impl QueryEngine {
         let mut builder = QueryBuilder::new()
             .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
             .filter_date_range(&start_str, &end_str)
-            .deduplicate();
-        builder = self.apply_filters_to_builder(builder, filters, true);
-        let query = builder.build();
-        self.stream_query_sql(&query, tx)
-    }
-
-    /// Stream changesets by ID range through a channel
-    pub fn stream_changesets_by_id_range(
-        &self,
-        start_id: i64,
-        end_id: i64,
-        filters: &QueryFilters,
-        tx: tokio::sync::mpsc::Sender<Changeset>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if start_id > end_id {
-            return Ok(());
-        }
-
-        let partitions = self
-            .partition_resolver
-            .get_partitions_for_id_range(start_id, end_id)
-            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
-        if partitions.is_empty() {
-            return Ok(());
-        }
-
-        let mut builder = QueryBuilder::new()
-            .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
-            .filter_id_range(start_id, end_id)
             .deduplicate();
         builder = self.apply_filters_to_builder(builder, filters, true);
         let query = builder.build();
@@ -608,6 +526,7 @@ mod serde_duckdb {
         // For now, let's try to map field by field.
 
         let id: i64 = row.get("id")?;
+        let replication_sequence: Option<u64> = row.get::<_, i64>("replication_sequence").ok().map(|v| v as u64);
         let created_at = row
             .get::<_, Value>("created_at")
             .ok()
@@ -637,6 +556,7 @@ mod serde_duckdb {
 
         Ok(Changeset {
             id,
+            replication_sequence,
             created_at,
             closed_at,
             open,
@@ -674,6 +594,7 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE changesets (
                 id BIGINT,
+                replication_sequence BIGINT,
                 created_at TIMESTAMP,
                 closed_at TIMESTAMP,
                 open BOOLEAN,
@@ -693,8 +614,8 @@ mod tests {
 
         conn.execute_batch(
             "INSERT INTO changesets VALUES
-                (1, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first', MAP {'source': 'aerial'}),
-                (2, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second', MAP {'comment': 'oops'});",
+                (1, 100, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first', MAP {'source': 'aerial'}),
+                (2, 110, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second', MAP {'comment': 'oops'});",
         )
         .expect("insert rows");
 
@@ -706,29 +627,6 @@ mod tests {
         conn.execute_batch(&copy_sql).expect("copy parquet");
 
         dir
-    }
-
-    #[test]
-    fn test_get_changeset_by_id() {
-        let dir = setup_parquet_dir();
-        let engine = QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
-
-        let changeset = engine.get_changeset(1).expect("query").expect("row");
-        assert_eq!(changeset.id, 1);
-        assert_eq!(changeset.user.as_deref(), Some("alice"));
-        assert_eq!(changeset.tags.get("source").map(|s| s.as_str()), Some("aerial"));
-
-        let expected_created = Utc
-            .with_ymd_and_hms(2024, 5, 1, 0, 0, 0)
-            .unwrap()
-            .timestamp_millis();
-        let expected_closed = Utc
-            .with_ymd_and_hms(2024, 5, 1, 1, 0, 0)
-            .unwrap()
-            .timestamp_millis();
-
-        assert_eq!(changeset.created_at, Some(expected_created));
-        assert_eq!(changeset.closed_at, Some(expected_closed));
     }
 
     #[test]

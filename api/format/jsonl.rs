@@ -139,6 +139,7 @@ mod tests {
     ) -> Changeset {
         Changeset {
             id,
+            replication_sequence: None,
             created_at: None,
             closed_at: None,
             open: false,

@@ -124,8 +124,8 @@ impl QueryBuilder {
         }
 
         if self.deduplicate {
-            // Latest wins strategy: prefer closed changesets, then latest created
-            query.push_str(" QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY closed_at DESC NULLS LAST, created_at DESC) = 1");
+            // Latest wins strategy: highest replication_sequence = freshest data
+            query.push_str(" QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY replication_sequence DESC NULLS LAST) = 1");
         }
 
         if let Some(limit) = self.limit {

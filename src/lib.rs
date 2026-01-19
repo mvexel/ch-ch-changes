@@ -31,6 +31,7 @@ pub mod writer;
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Changeset {
     pub id: i64,
+    pub replication_sequence: Option<u64>,
     pub created_at: Option<i64>,
     pub closed_at: Option<i64>,
     pub open: bool,
@@ -53,6 +54,7 @@ impl Changeset {
     pub fn new(id: i64) -> Self {
         Self {
             id,
+            replication_sequence: None,
             created_at: None,
             closed_at: None,
             open: true,

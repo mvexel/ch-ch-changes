@@ -1,7 +1,7 @@
 use anyhow::Result;
 use arrow::array::{
     ArrayRef, BooleanBuilder, Float64Builder, Int64Builder, MapBuilder, StringBuilder,
-    TimestampMillisecondBuilder, UInt32Builder,
+    TimestampMillisecondBuilder, UInt32Builder, UInt64Builder,
 };
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 pub struct BatchBuilders {
     id: Int64Builder,
+    replication_sequence: UInt64Builder,
     created_at: TimestampMillisecondBuilder,
     closed_at: TimestampMillisecondBuilder,
     open: BooleanBuilder,
@@ -33,6 +34,7 @@ impl BatchBuilders {
 
         Self {
             id: Int64Builder::with_capacity(capacity),
+            replication_sequence: UInt64Builder::with_capacity(capacity),
             created_at: TimestampMillisecondBuilder::with_capacity(capacity),
             closed_at: TimestampMillisecondBuilder::with_capacity(capacity),
             open: BooleanBuilder::with_capacity(capacity),
@@ -57,6 +59,12 @@ impl BatchBuilders {
 
     pub fn append(&mut self, cs: &Changeset) {
         self.id.append_value(cs.id);
+
+        if let Some(seq) = cs.replication_sequence {
+            self.replication_sequence.append_value(seq);
+        } else {
+            self.replication_sequence.append_null();
+        }
 
         if let Some(ts) = cs.created_at {
             self.created_at.append_value(ts);
@@ -142,6 +150,7 @@ impl BatchBuilders {
     pub fn finish_batch(&mut self, schema: &Arc<Schema>) -> Result<RecordBatch> {
         let columns: Vec<ArrayRef> = vec![
             Arc::new(self.id.finish()),
+            Arc::new(self.replication_sequence.finish()),
             Arc::new(self.created_at.finish()),
             Arc::new(self.closed_at.finish()),
             Arc::new(self.open.finish()),

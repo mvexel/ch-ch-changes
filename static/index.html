@@ -40,7 +40,7 @@
 
     <p>This service is useful if you want to retrieve metadata for a non-trivial subset of OSM changeset metadata.
         OSM lets you retrieve up to 100 at the time using the OSM API (<a href="https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets">docs</a>).
-        This service lets you query by minute, hour, day and even day ranges. Additionally, you can filter by user ID, bounding box, and tags.
+        This service lets you query by minute, hour, day and even day ranges. Additionally, you can filter by user ID and status.
     </p>
 
     <h3>About Changesets</h3>
@@ -56,26 +56,16 @@
 
     <h3>Data Updates</h3>
 
-    <p>Changeset data is updated weekly using the canonical changeset archive file OSM makes available. Check the <code>/meta/latest</code> endpoint for the latest changeset info.</p>
+    <p>Changeset data is updated weekly using the canonical changeset archive file OSM makes available, and continuously via replication diffs written in hourly batches. Check the <code>/meta/latest</code> endpoint for the latest changeset info.</p>
 
     <h2>Authentication</h2>
-    All data endpoints require an API key. Get one by logging in via OSM <a href="/auth/osm/start">here</a>. You will be issued a new API key after. Save it; it will not be shown again. Signing in again rotates the key.</p>
+    <p>All data endpoints require an API key. Get one by logging in via OSM <a href="/auth/osm/start">here</a>. You will be issued a new API key after. Save it; it will not be shown again. Signing in again rotates the key.</p>
     <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://DOMAIN/changesets/day/20240115.json</code></pre>
 
     <h2>API Endpoints</h2>
 
     <p><span class="endpoint">GET /health</span> - Health check</p>
     <pre><code>https://DOMAIN/health</code></pre>
-
-    <p><span class="endpoint">GET /changeset/{id}</span> - Single changeset 🔐</p>
-    <pre><code># XML format (default)
-https://DOMAIN/changeset/1
-
-# JSON format (using extension)
-https://DOMAIN/changeset/1.json
-
-# JSON format (using query param)
-https://DOMAIN/changeset/1?format=json</code></pre>
 
     <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}</span> - All changesets on a date 🔐</p>
     <pre><code># XML format (default)
@@ -95,9 +85,6 @@ https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
 
     <p><span class="endpoint">GET /changesets/date/from/{start}/to/{end}</span> - Date range (entire days) <strong>response can be huge!</strong> 🔐</p>
     <pre><code>https://DOMAIN/changesets/date/from/20240101/to/20240131.json</code></pre>
-
-    <p><span class="endpoint">GET /changesets/id/from/{start}/to/{end}</span> - Changeset ID range <strong>response can be huge!</strong> 🔐</p>
-    <pre><code>https://DOMAIN/changesets/id/from/1/to/100.json</code></pre>
 
     <p><span class="endpoint">GET /meta/latest</span> - Latest changeset info</p>
     <pre><code>https://DOMAIN/meta/latest</code></pre>

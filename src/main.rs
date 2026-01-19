@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use bzip2::read::MultiBzDecoder;
 use changesets_to_parquet::{
-    indexing::{write_metadata, write_partition_stats_index, IndexCollector},
+    indexing::{write_metadata, IndexCollector},
     models::PartitionSummary,
     parsing::parse_xml_to_channel,
     schema::create_schema,
@@ -36,7 +36,7 @@ struct Args {
     #[arg(long, default_value_t = false)]
     partition: bool,
 
-    /// Generate index files (user_stats.parquet, open_changesets.parquet, partition_stats.parquet)
+    /// Generate index files (user_stats.parquet, open_changesets.parquet)
     #[arg(long, default_value_t = false)]
     generate_indexes: bool,
 
@@ -124,13 +124,12 @@ fn main() -> Result<()> {
         println!("\nFinalizing partitions...");
         let PartitionSummary {
             counts: partition_counts,
-            stats: partition_stats,
+            stats: _,
         } = summary;
 
         if let Some(collector) = index_collector {
             println!("\nWriting indexes...");
             collector.write_indexes()?;
-            write_partition_stats_index(&output_dir, &partition_stats)?;
         }
 
         println!(

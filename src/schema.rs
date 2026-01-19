@@ -4,6 +4,7 @@ use std::sync::Arc;
 pub fn create_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
+        Field::new("replication_sequence", DataType::UInt64, true),
         Field::new(
             "created_at",
             DataType::Timestamp(TimeUnit::Millisecond, None),

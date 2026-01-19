@@ -1,9 +1,8 @@
 //! API route handlers
 //!
 //! This module contains all route handlers for the changeset historic API.
-//! Routes are organized into submodules for single changesets, batch/range queries, and metadata.
+//! Routes are organized into submodules for batch/range queries and metadata.
 
-pub mod changeset;
 pub mod changesets;
 pub mod meta;
 
@@ -19,7 +18,6 @@ pub fn create_router(state: AppState) -> Router {
         .route("/auth/osm/callback", get(auth::routes::oauth_callback));
 
     let protected_routes = Router::new()
-        .route("/changeset/:id", get(changeset::get_changeset))
         .route(
             "/changesets/day/:date",
             get(changesets::get_changesets_by_day),
@@ -31,10 +29,6 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/changesets/day/:date/hour/:hour/minute/:minute",
             get(changesets::get_changesets_by_minute),
-        )
-        .route(
-            "/changesets/id/from/:start/to/:end",
-            get(changesets::get_changesets_by_id_range),
         )
         .route(
             "/changesets/date/from/:start/to/:end",

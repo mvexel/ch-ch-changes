@@ -1,39 +1,29 @@
 //! Partition resolution and selection
 //!
-//! Determines which Parquet partitions to query based on date/ID ranges.
+//! Determines which Parquet partitions to query based on date ranges.
+//! Uses filesystem paths only - no index files required.
 
 use chrono::{DateTime, Datelike, NaiveDate};
-use duckdb::Connection;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Resolves partition files based on query parameters
-///
-/// # Features
-/// - Date to partition mapping
-/// - ID range fallback mapping (returns all partitions)
-/// - Partition filtering and pruning
 pub struct PartitionResolver {
-    #[allow(dead_code)]
     root: PathBuf,
-    partitions_by_key: HashMap<(u32, u32), Vec<PartitionInfo>>,
-    #[allow(dead_code)]
-    partitions_by_path: HashMap<String, PartitionInfo>,
-    has_id_index: bool,
+    partitions_by_key: HashMap<(u32, u32), Vec<PathBuf>>,
 }
 
 impl PartitionResolver {
     /// Create a new partition resolver
     ///
     /// # Arguments
-    /// - `index_path` - Path to directory containing partitioned Parquet files
-    pub fn new(index_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let root = PathBuf::from(index_path);
-        let mut partitions_by_key: HashMap<(u32, u32), Vec<PartitionInfo>> = HashMap::new();
-        let mut partitions_by_path = HashMap::new();
-        let mut has_id_index = true;
+    /// - `data_path` - Path to directory containing partitioned Parquet files
+    pub fn new(data_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let root = PathBuf::from(data_path);
+        let mut partitions_by_key: HashMap<(u32, u32), Vec<PathBuf>> = HashMap::new();
 
+        // Check for base/ and delta/ directories
         let base = root.join("base");
         let delta = root.join("delta");
         let roots = if base.exists() || delta.exists() {
@@ -49,42 +39,15 @@ impl PartitionResolver {
             vec![root.clone()]
         };
 
+        // Scan directories and discover partitions from filesystem
         for root_dir in roots {
-            if let Some(partitions) = load_partition_stats_index(&root_dir) {
-                for info in partitions {
-                    partitions_by_key
-                        .entry((info.year, info.month))
-                        .or_default()
-                        .push(info.clone());
-                    partitions_by_path.insert(info.path.clone(), info);
-                }
-            } else {
-                has_id_index = false;
-                let files = list_parquet_files(&root_dir);
-                for path in files {
-                    let (year, month) = match parse_partition_key(&path) {
-                        Some(value) => value,
-                        None => continue,
-                    };
-
-                    let file_size_bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                    let info = PartitionInfo {
-                        path: path.to_string_lossy().to_string(),
-                        year,
-                        month,
-                        changeset_count: 0,
-                        min_id: 0,
-                        max_id: 0,
-                        min_timestamp: 0,
-                        max_timestamp: 0,
-                        file_size_bytes,
-                    };
-
+            let files = list_parquet_files(&root_dir);
+            for path in files {
+                if let Some((year, month)) = parse_partition_key(&path) {
                     partitions_by_key
                         .entry((year, month))
                         .or_default()
-                        .push(info.clone());
-                    partitions_by_path.insert(info.path.clone(), info);
+                        .push(path);
                 }
             }
         }
@@ -92,13 +55,13 @@ impl PartitionResolver {
         Ok(Self {
             root,
             partitions_by_key,
-            partitions_by_path,
-            has_id_index,
         })
     }
 
     /// Get partitions for a date range
     ///
+    /// Maps the date range to (year, month) tuples and returns all files
+    /// for those months from both base and delta directories.
     pub fn get_partitions_for_date_range(
         &self,
         start_date: &str,
@@ -116,8 +79,8 @@ impl PartitionResolver {
         let mut month = start_month;
 
         loop {
-            if let Some(infos) = self.partitions_by_key.get(&(year, month)) {
-                paths.extend(infos.iter().map(|info| info.path.clone()));
+            if let Some(partition_paths) = self.partitions_by_key.get(&(year, month)) {
+                paths.extend(partition_paths.iter().map(|p| p.to_string_lossy().to_string()));
             }
 
             if (year, month) == (end_year, end_month) {
@@ -135,119 +98,28 @@ impl PartitionResolver {
         Ok(paths)
     }
 
-    /// Get partitions for an ID range
-    ///
-    /// Uses the partition stats index when available, otherwise returns all partitions.
-    pub fn get_partitions_for_id_range(
-        &self,
-        start_id: i64,
-        end_id: i64,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        if start_id > end_id {
-            return Err("start_id is after end_id".into());
-        }
+    /// Get all available partitions sorted by (year, month)
+    pub fn get_all_partitions(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let mut entries: Vec<_> = self.partitions_by_key.iter().collect();
+        entries.sort_by_key(|(key, _)| *key);
 
-        if !self.has_id_index {
-            return self.get_all_partitions();
-        }
-
-        let mut entries: Vec<_> = self.partitions_by_key.values().flatten().collect();
-        entries.sort_by_key(|info| (info.year, info.month));
         let mut paths = Vec::new();
-
-        for info in entries {
-            if info.min_id <= end_id && info.max_id >= start_id {
-                paths.push(info.path.clone());
-            }
+        for (_, partition_paths) in entries {
+            paths.extend(partition_paths.iter().map(|p| p.to_string_lossy().to_string()));
         }
 
         Ok(paths)
     }
-
-    /// Get all available partitions
-    ///
-    pub fn get_all_partitions(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let mut entries: Vec<_> = self.partitions_by_key.values().flatten().collect();
-        entries.sort_by_key(|info| (info.year, info.month));
-        Ok(entries.iter().map(|info| info.path.clone()).collect())
-    }
-
-    /// Get partitions for a specific date
-    #[allow(dead_code)]
-    pub fn get_partition_for_date(&self, date: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let (year, month) = parse_date_year_month(date)?;
-        self.partitions_by_key
-            .get(&(year, month))
-            .map(|infos| infos.iter().map(|i| i.path.clone()).collect())
-            .ok_or_else(|| "partition not found".into())
-    }
-
-    /// Get partitions containing a specific changeset ID
-    ///
-    /// Requires an ID range index to resolve partitions.
-    pub fn get_partition_for_id(&self, id: i64) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        if !self.has_id_index {
-            return Err(format!("no ID range index available for id={id}").into());
-        }
-
-        let mut paths = Vec::new();
-        for infos in self.partitions_by_key.values() {
-            for info in infos {
-                if info.min_id <= id && info.max_id >= id {
-                    paths.push(info.path.clone());
-                }
-            }
-        }
-
-        if paths.is_empty() {
-            Err("partition not found".into())
-        } else {
-            Ok(paths)
-        }
-    }
-
-    /// Get metadata about a partition
-    #[allow(dead_code)]
-    pub fn get_partition_metadata(
-        &self,
-        partition: &str,
-    ) -> Result<PartitionInfo, Box<dyn std::error::Error>> {
-        let path = Path::new(partition);
-        let full_path = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.root.join(path)
-        };
-        let key = full_path.to_string_lossy().to_string();
-
-        self.partitions_by_path
-            .get(&key)
-            .cloned()
-            .ok_or_else(|| "partition not found".into())
-    }
 }
 
-/// Metadata about a partition.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct PartitionInfo {
-    pub path: String,
-    pub year: u32,
-    pub month: u32,
-    pub changeset_count: u64,
-    pub min_id: i64,
-    pub max_id: i64,
-    pub min_timestamp: i64,
-    pub max_timestamp: i64,
-    pub file_size_bytes: u64,
-}
-
+/// Recursively list all parquet files in a directory
 fn list_parquet_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_parquet_files(dir, &mut files);
     files
 }
 
+/// Helper to recursively collect parquet files
 fn collect_parquet_files(dir: &Path, files: &mut Vec<PathBuf>) {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -257,6 +129,7 @@ fn collect_parquet_files(dir: &Path, files: &mut Vec<PathBuf>) {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
+            // Skip indexes directory
             if path.file_name().and_then(|n| n.to_str()) == Some("indexes") {
                 continue;
             }
@@ -267,6 +140,9 @@ fn collect_parquet_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+/// Parse year and month from a partition path
+///
+/// Expects paths like: .../year=2024/month=05.parquet or .../year=2024/month=05/file.parquet
 fn parse_partition_key(path: &Path) -> Option<(u32, u32)> {
     let mut year: Option<u32> = None;
     let mut month: Option<u32> = None;
@@ -287,76 +163,7 @@ fn parse_partition_key(path: &Path) -> Option<(u32, u32)> {
     }
 }
 
-fn load_partition_stats_index(root: &Path) -> Option<Vec<PartitionInfo>> {
-    let index_path = root.join("indexes/partition_stats.parquet");
-    if !index_path.exists() {
-        return None;
-    }
-
-    let conn = Connection::open_in_memory().ok()?;
-    let index_sql = index_path.to_string_lossy().replace('\'', "''");
-    let query = format!(
-        "SELECT path, year, month, changeset_count, min_id, max_id, \
-         min_created_at, max_created_at, file_size_bytes \
-         FROM read_parquet('{}')",
-        index_sql
-    );
-
-    let mut stmt = conn.prepare(&query).ok()?;
-    let mut rows = stmt.query([]).ok()?;
-    let mut partitions = Vec::new();
-
-    loop {
-        match rows.next() {
-            Ok(Some(row)) => {
-                let path: String = row.get("path").ok()?;
-                let year_val: i64 = row.get("year").ok()?;
-                let month_val: i64 = row.get("month").ok()?;
-                let count_val: i64 = row.get("changeset_count").ok()?;
-                let min_id: i64 = row.get("min_id").ok()?;
-                let max_id: i64 = row.get("max_id").ok()?;
-                let min_ts: Option<i64> = row.get("min_created_at").ok()?;
-                let max_ts: Option<i64> = row.get("max_created_at").ok()?;
-                let file_size: i64 = row.get("file_size_bytes").ok()?;
-
-                let year = u32::try_from(year_val).ok()?;
-                let month = u32::try_from(month_val).ok()?;
-                let changeset_count = u64::try_from(count_val).unwrap_or(0);
-                let file_size_bytes = u64::try_from(file_size).unwrap_or(0);
-
-                // Ensure path ends with .parquet extension
-                let path_with_ext = if path.ends_with(".parquet") {
-                    path.clone()
-                } else {
-                    format!("{}.parquet", path)
-                };
-
-                let full_path = if Path::new(&path_with_ext).is_absolute() {
-                    PathBuf::from(&path_with_ext)
-                } else {
-                    root.join(&path_with_ext)
-                };
-
-                partitions.push(PartitionInfo {
-                    path: full_path.to_string_lossy().to_string(),
-                    year,
-                    month,
-                    changeset_count,
-                    min_id,
-                    max_id,
-                    min_timestamp: min_ts.unwrap_or(0),
-                    max_timestamp: max_ts.unwrap_or(0),
-                    file_size_bytes,
-                });
-            }
-            Ok(None) => break,
-            Err(_) => return None,
-        }
-    }
-
-    Some(partitions)
-}
-
+/// Parse a date string into (year, month)
 fn parse_date_year_month(date: &str) -> Result<(u32, u32), Box<dyn std::error::Error>> {
     let parsed_date = if let Ok(value) = NaiveDate::parse_from_str(date, "%Y%m%d") {
         value
@@ -376,7 +183,6 @@ fn parse_date_year_month(date: &str) -> Result<(u32, u32), Box<dyn std::error::E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use duckdb::Connection;
     use std::fs;
     use tempfile::TempDir;
 
@@ -414,84 +220,5 @@ mod tests {
         assert_eq!(partitions.len(), 2);
         assert!(partitions[0].contains("month=05"));
         assert!(partitions[1].contains("month=06"));
-    }
-
-    #[test]
-    fn test_get_partition_for_date() {
-        let dir = setup_partitions();
-        let resolver = PartitionResolver::new(dir.path().to_str().unwrap()).expect("resolver");
-        let partitions = resolver.get_partition_for_date("2024-05-15").expect("partition");
-        assert!(!partitions.is_empty());
-        assert!(partitions[0].contains("month=05.parquet"));
-    }
-
-    #[test]
-    fn test_get_partition_metadata() {
-        let dir = setup_partitions();
-        let resolver = PartitionResolver::new(dir.path().to_str().unwrap()).expect("resolver");
-        let partitions = resolver.get_partition_for_date("20240601").expect("partition");
-        assert!(!partitions.is_empty());
-        let info = resolver
-            .get_partition_metadata(&partitions[0])
-            .expect("metadata");
-        assert_eq!(info.year, 2024);
-        assert_eq!(info.month, 6);
-        assert!(info.file_size_bytes > 0);
-    }
-
-    #[test]
-    fn test_get_partitions_for_id_range_fallback() {
-        let dir = setup_partitions();
-        let resolver = PartitionResolver::new(dir.path().to_str().unwrap()).expect("resolver");
-        let partitions = resolver.get_partitions_for_id_range(1, 10).expect("range");
-        assert_eq!(partitions.len(), 3);
-    }
-
-    #[test]
-    fn test_id_range_with_index() {
-        let dir = TempDir::new().expect("tempdir");
-        let indexes_dir = dir.path().join("indexes");
-        fs::create_dir_all(&indexes_dir).expect("indexes");
-
-        let index_path = indexes_dir.join("partition_stats.parquet");
-        let conn = Connection::open_in_memory().expect("duckdb");
-        conn.execute_batch(
-            "CREATE TABLE stats (
-                path VARCHAR,
-                year BIGINT,
-                month BIGINT,
-                changeset_count BIGINT,
-                min_id BIGINT,
-                max_id BIGINT,
-                min_created_at BIGINT,
-                max_created_at BIGINT,
-                file_size_bytes BIGINT
-            );",
-        )
-        .expect("create stats table");
-        conn.execute_batch(
-            "INSERT INTO stats VALUES
-                ('year=2024/month=05.parquet', 2024, 5, 10, 1, 100, NULL, NULL, 1234),
-                ('year=2024/month=06.parquet', 2024, 6, 10, 101, 200, NULL, NULL, 1234);",
-        )
-        .expect("insert stats");
-
-        let index_path_sql = index_path.to_string_lossy().replace('\'', "''");
-        let copy_sql = format!(
-            "COPY stats TO '{}' (FORMAT PARQUET);",
-            index_path_sql
-        );
-        conn.execute_batch(&copy_sql).expect("copy stats");
-
-        let resolver = PartitionResolver::new(dir.path().to_str().unwrap()).expect("resolver");
-        let partitions = resolver
-            .get_partitions_for_id_range(50, 80)
-            .expect("range");
-        assert_eq!(partitions.len(), 1);
-        assert!(partitions[0].contains("month=05"));
-
-        let partitions = resolver.get_partition_for_id(150).expect("partition");
-        assert!(!partitions.is_empty());
-        assert!(partitions[0].contains("month=06"));
     }
 }

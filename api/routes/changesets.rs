@@ -250,69 +250,6 @@ pub async fn get_changesets_by_day(
     }
 }
 
-pub async fn get_changesets_by_id_range(
-    State(state): State<AppState>,
-    Path((start_str, end_raw)): Path<(String, String)>,
-    Query(mut params): Query<QueryParams>,
-) -> Response {
-    let (end_str, ext_format) = extract_extension(&end_raw);
-    if params.format.is_none() {
-        params.format = ext_format;
-    }
-
-    let start_id = match start_str.parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => {
-            return ApiError::bad_request_with_details(
-                "Invalid start ID",
-                format!("'{}' is not a valid changeset ID", start_str),
-            )
-            .into_response()
-        }
-    };
-
-    let end_id = match end_str.parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => {
-            return ApiError::bad_request_with_details(
-                "Invalid end ID",
-                format!("'{}' is not a valid changeset ID", end_str),
-            )
-            .into_response()
-        }
-    };
-
-    // Streaming mode
-    if params.stream.unwrap_or(false) {
-        // if !STREAMING_ENABLED {
-        //     return streaming_disabled_response();
-        // }
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let engine = state.engine.clone();
-        let filters = params.to_filters();
-
-        tokio::task::spawn_blocking(move || {
-            if let Err(e) = engine.stream_changesets_by_id_range(start_id, end_id, &filters, tx) {
-                tracing::error!("Streaming query error: {}", e);
-            }
-        });
-
-        return create_streaming_response(params.format.as_deref(), rx);
-    }
-
-    // Non-streaming mode (existing behavior)
-    match state
-        .engine
-        .get_changesets_by_id_range(start_id, end_id, &params.to_filters())
-    {
-        Ok(changesets) => format_response(&changesets, params.format.as_deref(), false),
-        Err(e) => {
-            tracing::error!("Query error: {}", e);
-            ApiError::internal_error("Database query failed").into_response()
-        }
-    }
-}
-
 pub async fn get_changesets_by_date_range(
     State(state): State<AppState>,
     Path((start_str, end_raw)): Path<(String, String)>,
@@ -635,6 +572,7 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE changesets (
                 id BIGINT,
+                replication_sequence BIGINT,
                 created_at TIMESTAMP,
                 closed_at TIMESTAMP,
                 open BOOLEAN,
@@ -654,8 +592,8 @@ mod tests {
 
         conn.execute_batch(
             "INSERT INTO changesets VALUES
-                (1, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first', MAP {'comment': 'first'}),
-                (2, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second', MAP {'comment': 'second'});",
+                (1, 100, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00', false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first', MAP {'comment': 'first'}),
+                (2, 110, TIMESTAMP '2024-05-02 12:00:00', NULL, true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second', MAP {'comment': 'second'});",
         )
         .expect("insert rows");
 
@@ -842,33 +780,6 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn test_get_changesets_by_id_range() {
-        let (_dir, state) = setup_state().await;
-        let response = get_changesets_by_id_range(
-            State(state),
-            Path(("1".to_string(), "2".to_string())),
-            Query(QueryParams {
-                format: Some("json".to_string()),
-                user: None,
-                uid: None,
-                open: None,
-                limit: None,
-                offset: None,
-                stream: None,
-            }),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        let value: Value = serde_json::from_slice(&body).expect("json");
-        let changesets = value["changesets"].as_array().expect("changesets");
-        assert_eq!(changesets.len(), 2);
     }
 
     #[tokio::test]

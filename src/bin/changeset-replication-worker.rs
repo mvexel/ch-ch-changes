@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Timelike, Utc};
 use clap::Parser;
 use changesets_to_parquet::{
     parsing::parse_xml_to_channel, schema::create_schema, writer::consume_and_write_partitioned_parallel,
+    Changeset,
 };
+use duckdb::Connection;
 use flate2::read::GzDecoder;
 use reqwest::blocking::Client;
 use reqwest::StatusCode;
@@ -61,7 +63,7 @@ struct Args {
     #[arg(long, default_value_t = false)]
     once: bool,
 
-    /// Initialize local state from partition stats and exit
+    /// Initialize local state from existing parquet data and exit
     #[arg(long, default_value_t = false)]
     bootstrap_state_from_parquet: bool,
 
@@ -76,12 +78,97 @@ struct Args {
     /// Keep temporary files for debugging
     #[arg(long, default_value_t = false)]
     keep_temp: bool,
+
+    /// Batch sequences by hour (recommended for production)
+    #[arg(long, default_value_t = true)]
+    hourly_batching: bool,
+
+    /// Maximum sequences to buffer before forcing a write (safety limit)
+    #[arg(long, default_value_t = 120)]
+    max_batch_sequences: u64,
 }
 
 #[derive(Debug, Clone)]
 struct ReplicationState {
     sequence_number: u64,
     timestamp: DateTime<Utc>,
+}
+
+/// Accumulates changesets across multiple sequences into hourly batches
+struct BatchAccumulator {
+    changesets: Vec<Changeset>,
+    batch_hour: Option<DateTime<Utc>>,
+    start_sequence: u64,
+    end_sequence: u64,
+    sequence_count: u64,
+}
+
+impl BatchAccumulator {
+    fn new(start_sequence: u64) -> Self {
+        Self {
+            changesets: Vec::new(),
+            batch_hour: None,
+            start_sequence,
+            end_sequence: start_sequence,
+            sequence_count: 0,
+        }
+    }
+
+    /// Add changesets from a sequence. Returns true if we've crossed an hour boundary.
+    fn add(&mut self, mut changesets: Vec<Changeset>, sequence: u64, sequence_timestamp: DateTime<Utc>) -> bool {
+        let seq_hour = sequence_timestamp.date_naive().and_hms_opt(sequence_timestamp.hour(), 0, 0)
+            .map(|naive| Utc.from_utc_datetime(&naive));
+
+        // Initialize batch_hour on first add
+        if self.batch_hour.is_none() {
+            self.batch_hour = seq_hour;
+        }
+
+        // Check if we've crossed an hour boundary
+        let crossed_hour = seq_hour != self.batch_hour;
+
+        if !crossed_hour {
+            // Set replication_sequence for all changesets in this batch
+            for cs in &mut changesets {
+                cs.replication_sequence = Some(sequence);
+            }
+            self.changesets.extend(changesets);
+            self.end_sequence = sequence;
+            self.sequence_count += 1;
+        }
+
+        crossed_hour
+    }
+
+    /// Check if accumulator is empty
+    fn is_empty(&self) -> bool {
+        self.changesets.is_empty()
+    }
+
+    /// Get the current batch size
+    fn len(&self) -> usize {
+        self.changesets.len()
+    }
+
+    /// Get the batch hour as YYYYMMDDHH string
+    fn hour_string(&self) -> Option<String> {
+        self.batch_hour.map(|dt| dt.format("%Y%m%d%H").to_string())
+    }
+
+    /// Take all accumulated changesets, resetting the accumulator for the next batch
+    fn take_batch(&mut self, new_hour: DateTime<Utc>, new_sequence: u64) -> Vec<Changeset> {
+        let batch = std::mem::take(&mut self.changesets);
+        self.batch_hour = Some(new_hour);
+        self.start_sequence = new_sequence;
+        self.end_sequence = new_sequence;
+        self.sequence_count = 0;
+        batch
+    }
+
+    /// Flush remaining changesets (for end of catch-up)
+    fn flush(&mut self) -> Vec<Changeset> {
+        std::mem::take(&mut self.changesets)
+    }
 }
 
 fn main() -> Result<()> {
@@ -138,18 +225,108 @@ fn main() -> Result<()> {
             end_sequence = end_sequence.min(last_state.sequence_number + max_per_run);
         }
 
-        for seq in (last_state.sequence_number + 1)..=end_sequence {
-            log_info(&format!("Processing sequence {}", seq));
-            let seq_state = process_sequence(
-                &client,
-                &base_url,
-                seq,
-                &temp_root,
-                &delta_dir,
-                &args,
-            )?;
-            write_state(&state_path, &seq_state)?;
-            last_state = seq_state;
+        if args.hourly_batching {
+            // Hourly batching mode: accumulate changesets across sequences
+            let mut accumulator = BatchAccumulator::new(last_state.sequence_number + 1);
+            let mut last_seq_state_in_batch: Option<ReplicationState> = None;
+
+            for seq in (last_state.sequence_number + 1)..=end_sequence {
+                log_info(&format!("Fetching sequence {}", seq));
+
+                let seq_state = fetch_sequence_state(&client, &base_url, seq)?
+                    .context("Missing sequence state file")?;
+
+                let mut changesets = parse_sequence(&client, &base_url, seq, &temp_root, &args)?;
+
+                // Try to add to accumulator - returns true if hour boundary crossed
+                let crossed_hour = accumulator.add(changesets.clone(), seq, seq_state.timestamp);
+
+                if crossed_hour {
+                    // Write the accumulated batch before the boundary
+                    let hour_str = accumulator
+                        .hour_string()
+                        .context("Missing hour string for batch flush")?;
+                    let state_to_flush = last_seq_state_in_batch
+                        .take()
+                        .context("Missing last sequence state for batch flush")?;
+
+                    log_info(&format!(
+                        "Hour boundary crossed at sequence {} - writing batch for {}",
+                        seq, hour_str
+                    ));
+                    let batch = accumulator.take_batch(
+                        seq_state.timestamp.date_naive().and_hms_opt(seq_state.timestamp.hour(), 0, 0)
+                            .map(|naive| Utc.from_utc_datetime(&naive))
+                            .unwrap(),
+                        seq
+                    );
+                    write_hourly_batch(batch, &delta_dir, &hour_str, &temp_root, args.batch_size, args.keep_temp)?;
+                    write_state(&state_path, &state_to_flush)?;
+                    last_state = state_to_flush;
+
+                    // Now add the current sequence to the new batch
+                    for cs in &mut changesets {
+                        cs.replication_sequence = Some(seq);
+                    }
+                    accumulator.add(changesets, seq, seq_state.timestamp);
+                }
+
+                last_seq_state_in_batch = Some(seq_state.clone());
+
+                // Safety check: force flush if we've accumulated too many sequences
+                if accumulator.sequence_count >= args.max_batch_sequences {
+                    let hour_str = accumulator
+                        .hour_string()
+                        .context("Missing hour string for max-sequence flush")?;
+                    let state_to_flush = last_seq_state_in_batch
+                        .take()
+                        .context("Missing last sequence state for max-sequence flush")?;
+
+                    log_info(&format!(
+                        "Max batch sequences ({}) reached - flushing batch for {}",
+                        args.max_batch_sequences, hour_str
+                    ));
+                    let batch = accumulator.flush();
+                    write_hourly_batch(batch, &delta_dir, &hour_str, &temp_root, args.batch_size, args.keep_temp)?;
+                    write_state(&state_path, &state_to_flush)?;
+                    last_state = state_to_flush;
+                    accumulator = BatchAccumulator::new(seq + 1);
+                }
+            }
+
+            // Flush any remaining changesets at end of catch-up
+            if last_seq_state_in_batch.is_some() {
+                let hour_str = accumulator
+                    .hour_string()
+                    .context("Missing hour string for final flush")?;
+                let state_to_flush = last_seq_state_in_batch
+                    .take()
+                    .context("Missing last sequence state for final flush")?;
+                log_info(&format!(
+                    "End of catch-up - flushing final batch for {} ({} changesets)",
+                    hour_str,
+                    accumulator.len()
+                ));
+                let batch = accumulator.flush();
+                write_hourly_batch(batch, &delta_dir, &hour_str, &temp_root, args.batch_size, args.keep_temp)?;
+                write_state(&state_path, &state_to_flush)?;
+                last_state = state_to_flush;
+            }
+        } else {
+            // Original per-sequence mode
+            for seq in (last_state.sequence_number + 1)..=end_sequence {
+                log_info(&format!("Processing sequence {}", seq));
+                let seq_state = process_sequence(
+                    &client,
+                    &base_url,
+                    seq,
+                    &temp_root,
+                    &delta_dir,
+                    &args,
+                )?;
+                write_state(&state_path, &seq_state)?;
+                last_state = seq_state;
+            }
         }
 
         if args.once {
@@ -338,10 +515,25 @@ fn bootstrap_state_from_parquet(
     delta_dir: &Path,
 ) -> Result<()> {
     fs::create_dir_all(delta_dir)?;
-    let stats_path = find_partition_stats_path(data_path)
-        .context("partition_stats.parquet not found")?;
-    let max_ts_millis = max_created_at_from_stats(&stats_path)
-        .context("No max_created_at value found in partition stats")?;
+    let mut files = Vec::new();
+    let base_path = data_path.join("base");
+    if base_path.exists() {
+        collect_parquet_files(&base_path, &mut files)?;
+    }
+    let delta_path = data_path.join("delta");
+    if delta_path.exists() {
+        collect_parquet_files(&delta_path, &mut files)?;
+    }
+
+    if files.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No parquet files found under {:?}",
+            data_path
+        ));
+    }
+
+    let max_ts_millis = max_created_at_from_parquet_files(&files)
+        .context("No created_at value found in parquet data")?;
 
     let target_ts = Utc
         .timestamp_millis_opt(max_ts_millis)
@@ -368,28 +560,16 @@ fn bootstrap_state_from_parquet(
     Ok(())
 }
 
-fn find_partition_stats_path(data_path: &Path) -> Option<PathBuf> {
-    let base_path = data_path.join("base/indexes/partition_stats.parquet");
-    if base_path.exists() {
-        return Some(base_path);
-    }
-
-    let root_path = data_path.join("indexes/partition_stats.parquet");
-    if root_path.exists() {
-        return Some(root_path);
-    }
-
-    None
-}
-
-fn max_created_at_from_stats(path: &Path) -> Result<i64> {
-    use duckdb::Connection;
-
+fn max_created_at_from_parquet_files(files: &[PathBuf]) -> Result<i64> {
     let conn = Connection::open_in_memory()?;
-    let stats_path = path.to_string_lossy().replace('\'', "''");
+    let file_list: Vec<String> = files
+        .iter()
+        .map(|path| escape_sql_string(path.as_path()))
+        .collect();
+    let list_sql = file_list.join("','");
     let query = format!(
-        "SELECT MAX(max_created_at) AS max_ts FROM read_parquet('{}')",
-        stats_path
+        "SELECT MAX(epoch_ms(created_at)) AS max_ts FROM read_parquet(['{}'])",
+        list_sql
     );
     let mut stmt = conn.prepare(&query)?;
     let mut rows = stmt.query([])?;
@@ -397,7 +577,7 @@ fn max_created_at_from_stats(path: &Path) -> Result<i64> {
         let max_ts: Option<i64> = row.get("max_ts")?;
         return max_ts.context("max_ts is NULL");
     }
-    Err(anyhow::anyhow!("partition_stats query returned no rows"))
+    Err(anyhow::anyhow!("created_at query returned no rows"))
 }
 
 fn fetch_text(client: &Client, url: &str) -> Result<Option<String>> {
@@ -623,4 +803,302 @@ fn sequence_path_parts(sequence: u64) -> (String, String, String) {
 fn log_info(message: &str) {
     let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S");
     println!("[{}] INFO: {}", timestamp, message);
+}
+
+/// Parse a sequence and return the changesets without writing to disk
+fn parse_sequence(
+    client: &Client,
+    base_url: &str,
+    sequence: u64,
+    temp_root: &Path,
+    args: &Args,
+) -> Result<Vec<Changeset>> {
+    let sequence_dir = temp_root.join(format!("seq-{:09}", sequence));
+    if sequence_dir.exists() {
+        fs::remove_dir_all(&sequence_dir)
+            .with_context(|| format!("Failed to clear {:?}", sequence_dir))?;
+    }
+    fs::create_dir_all(&sequence_dir)?;
+
+    let diff_path = sequence_dir.join("changeset.osm.gz");
+    let diff_url = sequence_diff_url(base_url, sequence);
+    download_file(client, &diff_url, &diff_path)?;
+
+    let file = File::open(&diff_path)?;
+    let decoder = GzDecoder::new(file);
+
+    let (tx, rx) = sync_channel(32);
+    let continue_on_error = args.continue_on_error;
+    let parser_handle = thread::spawn(move || {
+        parse_xml_to_channel(decoder, tx, continue_on_error);
+    });
+
+    // Collect all changesets
+    let mut all_changesets = Vec::new();
+    for batch_result in rx {
+        let batch = batch_result?;
+        all_changesets.extend(batch);
+    }
+
+    if parser_handle.join().is_err() {
+        return Err(anyhow::anyhow!("Parser thread panicked"));
+    }
+
+    // Clean up temp directory
+    if !args.keep_temp {
+        fs::remove_dir_all(&sequence_dir)
+            .with_context(|| format!("Failed to remove {:?}", sequence_dir))?;
+    }
+
+    Ok(all_changesets)
+}
+
+/// Write a batch of changesets to hourly-partitioned parquet files
+fn write_hourly_batch(
+    changesets: Vec<Changeset>,
+    delta_dir: &Path,
+    hour_string: &str,
+    temp_root: &Path,
+    batch_size: usize,
+    keep_temp: bool,
+) -> Result<()> {
+    if changesets.is_empty() {
+        return Ok(());
+    }
+
+    let batch_dir = temp_root.join(format!("batch-{}", hour_string));
+    if batch_dir.exists() {
+        fs::remove_dir_all(&batch_dir)?;
+    }
+    fs::create_dir_all(&batch_dir)?;
+
+    let output_dir = batch_dir.join("output");
+    fs::create_dir_all(&output_dir)?;
+
+    // Write changesets using partitioned writer
+    let (tx, rx) = sync_channel(32);
+    let output_dir_clone = output_dir.clone();
+    let writer_handle = thread::spawn(move || {
+        let schema = create_schema();
+        consume_and_write_partitioned_parallel(rx, output_dir_clone, schema, batch_size, None)
+    });
+
+    // Send changesets in batches
+    let chunk_size = 1000;
+    for chunk in changesets.chunks(chunk_size) {
+        tx.send(Ok(chunk.to_vec()))?;
+    }
+    drop(tx);
+
+    let (total_count, summary) = writer_handle.join()
+        .map_err(|_| anyhow::anyhow!("Writer thread panicked"))??;
+
+    log_info(&format!(
+        "Batch {}: wrote {} changesets across {} partitions",
+        hour_string,
+        total_count,
+        summary.counts.len()
+    ));
+
+    // Move output files with hourly naming
+    move_output_files_hourly(&output_dir, delta_dir, hour_string)?;
+
+    if !keep_temp {
+        fs::remove_dir_all(&batch_dir)
+            .with_context(|| format!("Failed to remove {:?}", batch_dir))?;
+    }
+
+    Ok(())
+}
+
+/// Move parquet files to delta directory with YYYYMMDDHH naming
+fn move_output_files_hourly(output_dir: &Path, delta_dir: &Path, hour_string: &str) -> Result<()> {
+    let mut files = Vec::new();
+    collect_parquet_files(output_dir, &mut files)?;
+
+    for file_path in files {
+        let (year, month) = extract_year_month(&file_path)
+            .with_context(|| format!("Unable to parse year/month from {:?}", file_path))?;
+
+        let dest_dir = delta_dir
+            .join(format!("year={}", year))
+            .join(format!("month={:02}", month));
+        fs::create_dir_all(&dest_dir)?;
+
+        let dest_path = dest_dir.join(format!("{}.parquet", hour_string));
+        if dest_path.exists() {
+            merge_parquet_files(&dest_path, &file_path)?;
+            continue;
+        }
+
+        if let Err(err) = fs::rename(&file_path, &dest_path) {
+            let copy_result = fs::copy(&file_path, &dest_path);
+            if copy_result.is_ok() {
+                fs::remove_file(&file_path)?;
+            } else {
+                return Err(err.into());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn merge_parquet_files(existing_path: &Path, new_path: &Path) -> Result<()> {
+    let temp_path = existing_path.with_extension("parquet.tmp");
+    if temp_path.exists() {
+        fs::remove_file(&temp_path)?;
+    }
+
+    let existing_sql = escape_sql_string(existing_path);
+    let new_sql = escape_sql_string(new_path);
+    let temp_sql = escape_sql_string(&temp_path);
+    let sql = format!(
+        "COPY (SELECT * FROM read_parquet('{}') UNION ALL SELECT * FROM read_parquet('{}')) TO '{}' (FORMAT 'parquet')",
+        existing_sql, new_sql, temp_sql
+    );
+
+    let conn = Connection::open_in_memory()?;
+    conn.execute(&sql, [])?;
+
+    fs::remove_file(existing_path)?;
+    fs::rename(&temp_path, existing_path)?;
+    fs::remove_file(new_path)?;
+
+    Ok(())
+}
+
+fn escape_sql_string(path: &Path) -> String {
+    path.to_string_lossy().replace('\'', "''")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use duckdb::Connection;
+    use tempfile::TempDir;
+
+    fn write_test_parquet(path: &Path, rows: &[(i64, i64, &str)]) -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE changesets (
+                id BIGINT,
+                replication_sequence BIGINT,
+                created_at TIMESTAMP,
+                closed_at TIMESTAMP,
+                open BOOLEAN,
+                user VARCHAR,
+                uid BIGINT,
+                min_lat DOUBLE,
+                min_lon DOUBLE,
+                max_lat DOUBLE,
+                max_lon DOUBLE,
+                num_changes INTEGER,
+                comments_count INTEGER,
+                description VARCHAR,
+                tags MAP(VARCHAR, VARCHAR)
+            );",
+        )?;
+
+        for (id, seq, created_at) in rows {
+            let sql = format!(
+                "INSERT INTO changesets VALUES
+                    ({}, {}, TIMESTAMP '{}', NULL, false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first', MAP {{'comment': 'test'}});",
+                id, seq, created_at
+            );
+            conn.execute_batch(&sql)?;
+        }
+
+        let path_sql = escape_sql_string(path);
+        let copy_sql = format!(
+            "COPY changesets TO '{}' (FORMAT PARQUET);",
+            path_sql
+        );
+        conn.execute_batch(&copy_sql)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_batch_accumulator_hour_boundary() {
+        let start_seq = 10;
+        let mut acc = BatchAccumulator::new(start_seq);
+        let ts1 = Utc.with_ymd_and_hms(2024, 5, 1, 10, 0, 0).unwrap();
+        let ts2 = Utc.with_ymd_and_hms(2024, 5, 1, 11, 0, 0).unwrap();
+
+        let mut changesets = Vec::new();
+        for id in 1..=3 {
+            changesets.push(Changeset {
+                id,
+                replication_sequence: None,
+                created_at: None,
+                closed_at: None,
+                open: false,
+                user: None,
+                uid: None,
+                min_lat: None,
+                min_lon: None,
+                max_lat: None,
+                max_lon: None,
+                num_changes: 0,
+                comments_count: 0,
+                description: None,
+                tags: std::collections::HashMap::new(),
+            });
+        }
+
+        let crossed = acc.add(changesets.clone(), 100, ts1);
+        assert!(!crossed);
+        assert_eq!(acc.sequence_count, 1);
+        assert_eq!(acc.len(), 3);
+        assert!(acc.changesets.iter().all(|cs| cs.replication_sequence == Some(100)));
+
+        let crossed = acc.add(changesets, 101, ts2);
+        assert!(crossed);
+        assert_eq!(acc.sequence_count, 1);
+        assert_eq!(acc.len(), 3);
+        assert_eq!(acc.hour_string().as_deref(), Some("2024050110"));
+    }
+
+    #[test]
+    fn test_merge_parquet_files() {
+        let dir = TempDir::new().expect("tempdir");
+        let existing = dir.path().join("existing.parquet");
+        let incoming = dir.path().join("incoming.parquet");
+
+        write_test_parquet(&existing, &[(1, 100, "2024-05-01 00:00:00")]).expect("write existing");
+        write_test_parquet(&incoming, &[(2, 110, "2024-05-01 01:00:00")]).expect("write incoming");
+
+        merge_parquet_files(&existing, &incoming).expect("merge");
+        assert!(existing.exists());
+        assert!(!incoming.exists());
+
+        let conn = Connection::open_in_memory().expect("duckdb");
+        let path_sql = escape_sql_string(&existing);
+        let mut stmt = conn
+            .prepare(&format!("SELECT COUNT(*) AS cnt FROM read_parquet('{}')", path_sql))
+            .expect("prepare");
+        let mut rows = stmt.query([]).expect("query");
+        let row = rows.next().expect("row").expect("row result");
+        let count: i64 = row.get("cnt").expect("count");
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_max_created_at_from_parquet_files() {
+        let dir = TempDir::new().expect("tempdir");
+        let first = dir.path().join("first.parquet");
+        let second = dir.path().join("second.parquet");
+
+        write_test_parquet(&first, &[(1, 100, "2024-05-01 00:00:00")]).expect("write first");
+        write_test_parquet(&second, &[(2, 110, "2024-05-02 12:00:00")]).expect("write second");
+
+        let files = vec![first, second];
+        let max_ts = max_created_at_from_parquet_files(&files).expect("max ts");
+        let expected = Utc
+            .with_ymd_and_hms(2024, 5, 2, 12, 0, 0)
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(max_ts, expected);
+    }
 }
