@@ -1,0 +1,6 @@
+name: health
+url: $BASE_URL/health
+auth:
+  type: bearer_token
+  bearer_token:
+    token: $API_KEY

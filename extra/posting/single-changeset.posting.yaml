@@ -1,0 +1,6 @@
+name: single changeset
+url: $BASE_URL/changeset/50897208.json
+auth:
+  type: bearer_token
+  bearer_token:
+    token: $API_KEY

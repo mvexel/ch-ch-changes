@@ -1,0 +1,6 @@
+name: state
+url: $BASE_URL/meta/replication
+auth:
+  type: bearer_token
+  bearer_token:
+    token: $API_KEY
