@@ -1,116 +1,30 @@
 # OSM Changeset to Parquet converter and Bulk changeset metadata API
 
-There are two tools here:
-1. `changesets-to-parquet` This tool converts the OSM Changeset metadata dump (.osm.bz2) to a proper parquet file you can query using DuckDB.
-2. `changeset-server`: A server that exposes an API and remote parquet query access using the output of the above.
+This project contains a small collection of tools that function together to create an API that lets you query by entire days, hours, minutes, or a range of changeset ids, and supports additional output formats like `jsonl` for efficient streaming processing.
 
-> This toolkit only deals with changeset **metadata**, not with the actual map edits the changeset represents.
+For end-user information, see [https://chch.osm.lol](https://chch.osm.lol).
 
-## Converter
+## Architecture
 
-### Usage
-
-First, download a changeset dump file from https://planet.osm.org/.
-
-```bash
-changesets-to-parquet --input changesets-latest.osm.bz2 --output changesets.parquet 
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  OSM Planet     │────▶│    Converter     │────▶│  base/*.parquet │
+│  Dump (.bz2)    │     │                  │     │                 │
+└─────────────────┘     └──────────────────┘     └────────┬────────┘
+                                                          │
+┌─────────────────┐     ┌──────────────────┐     ┌────────▼────────┐
+│  OSM Replication│────▶│ Replication      │────▶│ delta/*.parquet │
+│  Feed (minutely)│     │ Worker           │     │                 │
+└─────────────────┘     └──────────────────┘     └────────┬────────┘
+                                                          │
+                        ┌──────────────────┐     ┌────────▼────────┐
+                        │   API Server     │◀────│   DuckDB        │
+                        │   (Axum)         │     │   (in-memory)   │
+                        └────────┬─────────┘     └─────────────────┘
+                                 │
+                        ┌────────▼─────────┐
+                        │   HTTP Clients   │
+                        │   (JSON/XML/JSONL│
+                        └──────────────────┘
 ```
 
-There are additional options for chunk size, partitioning and adding a couple of different indexes to speed up common queries. See `changesets-to-parquet --help` for more. 
-
-You can achieve significant speed-up by using `pbzip2` for multithreaded decompression and piping that into the tool.
-
-## Server
-
-Run with 
-
-```bash
-DATA_PATH=/opt/changeset-data/changesets .changeset-server
-```
-
-## Replication Worker
-
-To keep data fresh between full refreshes, use the minutely replication worker. See
-`docs/REPLICATION_WORKER.md` for setup and systemd instructions.
-
-### Authentication
-
-The API now requires an API key for all data endpoints. Obtain a key by signing in with your OpenStreetMap account:
-
-- Start OAuth: `GET /auth/osm/start`
-- Key issued on callback and shown once
-
-Use the key on requests:
-
-```bash
-curl -H "Authorization: Bearer YOUR_KEY" https://DOMAIN/changesets/day/20240115.json
-```
-
-`/health` remains public.
-
-### Endpoints
-
-- `GET /health - Health check`
-- `GET /changeset/{id}.json` - Single changeset
-- `GET /changesets/day/{YYYYMMDD}` - All changesets on a date
-- `GET /changesets/day/{YYYYMMDD}/hour/{HH}/[minute/{MM}]` - All changesets on a date and time.
-- `GET /changesets/from/{start}/to/{end}` - Date range (only handles entire days) response can be huge!
-- `GET /meta/replication` - Replication state (sequence + last_run)
-- `GET /auth/me` - Account limits & usage (requires API key)
-
-## Geoparquet?
-
-The only geometries in this data are bounding boxes, so most spatial operations will be cheap. If you do want geoparquet, it's straightforward to do. 
-The resulting geoparquet file(s) will be ~15% bigger.
-
-```sql
-COPY (
-    SELECT
-        *,
-        ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat) AS geometry
-    FROM read_parquet('changesets.parquet')
-    WHERE min_lat IS NOT NULL
-) TO 'changesets_geo.parquet' (
-    FORMAT PARQUET,
-    CODEC 'ZSTD'
-);
-```
-
-Or if you created partitioned output:
-
-```sql
-COPY (
-    SELECT
-        *,
-        ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat) AS geometry
-    FROM read_parquet('changesets/year=*/month=*.parquet')
-    WHERE min_lat IS NOT NULL
-) TO 'changesets_geo.parquet' (FORMAT PARQUET, CODEC 'ZSTD');
-```
-
-Or a time slice (if you used partitions to create):
-```sql
-COPY (
-    SELECT
-        *,
-        ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat) AS geometry
-    FROM read_parquet('changesets/year=2024/month=0[123].parquet')
-    WHERE min_lat IS NOT NULL
-) TO 'changesets_q1_2024_geo.parquet' (FORMAT PARQUET);
-```
-
-You can also keep the partitioning: 
-
-```sql
-COPY (
-    SELECT
-        *,
-        ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat) AS geometry
-    FROM read_parquet('changesets/year=*/month=*.parquet')
-    WHERE min_lat IS NOT NULL
-) TO 'geo_output' (
-    FORMAT PARQUET,
-    PARTITION_BY (year),
-    CODEC 'ZSTD'
-);
-```
