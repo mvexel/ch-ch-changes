@@ -1,53 +1,30 @@
-# Caddyfile.example - Example Caddy configuration
-# Copy this to 'Caddyfile' and customize for your deployment:
-#   cp Caddyfile.example Caddyfile
-#
-# The actual 'Caddyfile' is gitignored so your customizations won't be tracked.
+your.domain {
+      # Proxy all API and changeset requests to Rust server
+      handle /changesets/* {
+          reverse_proxy localhost:3000
+      }
 
-{
-    email your-email@example.com
-    admin off
-}
+      handle /changeset/* {
+          reverse_proxy localhost:3000
+      }
 
-# Replace with your actual domain
-# For testing with IP address only, use:
-# http://5.161.255.103 {
-#     reverse_proxy api:3000
-# }
+      handle /meta/* {
+          reverse_proxy localhost:3000
+      }
 
-changesets.yourdomain.com {
-    # Homepage
-    handle / {
-        root * /srv
-        try_files {path} /index.html
-        file_server
-    }
+      handle /health {
+          reverse_proxy localhost:3000
+      }
 
-    # Direct access to parquet files for DuckDB queries
-    handle_path /data/* {
-        root * /data/changesets
-        file_server browse
-    }
+      handle /auth/* {
+          reverse_proxy localhost:3000
+      }
 
-    # API endpoints (catch-all for everything else)
-    handle {
-        reverse_proxy api:3000
-    }
-
-    encode gzip zstd
-
-    log {
-        output file /var/log/caddy/access.log
-        format json
-    }
-
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        -Server
-        # Allow CORS for DuckDB client-side queries
-        Access-Control-Allow-Origin "*"
-        Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
-    }
+      # Static files and SPA fallback
+      handle {
+          root * /opt/changeset-app/static
+          templates
+          try_files {path} /index.html
+          file_server
+      }
 }
