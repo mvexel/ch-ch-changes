@@ -11,14 +11,14 @@ Group=changeset
 WorkingDirectory=/opt/changeset-server
 
 # Environment variables
-Environment="DATA_PATH=/opt/changeset-data/changesets"
+Environment="DATA_PATH=/opt/changeset-data"
 Environment="RUST_LOG=info"
 Environment="HOME=/var/lib/changeset-server"
 Environment="AUTH_DB_PATH=/var/lib/changeset-server/auth.sqlite"
-Environment="AUTH_KEY_SECRET=change-me"
-Environment="OSM_OAUTH_CLIENT_ID=change-me"
-Environment="OSM_OAUTH_CLIENT_SECRET=change-me"
-Environment="OSM_OAUTH_REDIRECT_URL=https://changesets.yourdomain.com/auth/osm/callback"
+Environment="AUTH_KEY_SECRET=YOUR_STRONG_SECRET_HERE"
+Environment="OSM_OAUTH_CLIENT_ID=YOUR_CLIENT_ID_HERE"
+Environment="OSM_OAUTH_CLIENT_SECRET=YOUR_CLIENT_SECRET_HERE"
+Environment="OSM_OAUTH_REDIRECT_URL=https://chch.osm.lol/auth/osm/callback"
 Environment="AUTH_DEFAULT_DAILY_LIMIT=0"
 Environment="AUTH_DEFAULT_MONTHLY_LIMIT=0"
 
