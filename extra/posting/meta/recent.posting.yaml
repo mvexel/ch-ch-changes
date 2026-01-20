@@ -1,6 +1,0 @@
-name: latest
-url: $BASE_URL/meta/state
-auth:
-  type: bearer_token
-  bearer_token:
-    token: $API_KEY

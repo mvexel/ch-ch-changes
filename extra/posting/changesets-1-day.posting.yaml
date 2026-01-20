@@ -1,6 +1,0 @@
-name: 1 day jsonl
-url: $BASE_URL/changesets/day/20251110.jsonl
-auth:
-  type: bearer_token
-  bearer_token:
-    token: ${API_KEY}

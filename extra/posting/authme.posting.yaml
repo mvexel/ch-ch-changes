@@ -1,6 +1,0 @@
-name: auth me
-url: $BASE_URL/auth/me
-auth:
-  type: bearer_token
-  bearer_token:
-    token: $API_KEY

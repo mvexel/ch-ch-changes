@@ -1,6 +1,0 @@
-name: time range 1m
-url: $BASE_URL/changesets/day/20251111/hour/12/minute/59
-auth:
-  type: bearer_token
-  bearer_token:
-    token: $API_KEY
