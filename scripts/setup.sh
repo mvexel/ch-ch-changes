@@ -20,7 +20,7 @@ fi
 
 # Configuration
 DEPLOY_DIR="/opt/changeset-server"
-DATA_DIR="/opt/changeset-data/changesets"
+DATA_DIR="/opt/changeset-data/base"
 SERVICE_USER="changeset"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
