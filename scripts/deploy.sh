@@ -66,6 +66,7 @@ ln -sfn "$DEPLOY_DIR/releases/current/changeset-replication-worker" "$DEPLOY_DIR
 # Ensure binaries are in PATH
 if [ -d "/usr/local/bin" ]; then
     echo "Linking binaries to /usr/local/bin..."
+    sudo ln -sf "$DEPLOY_DIR/bin/changeset-server" /usr/local/bin/changeset-server
     sudo ln -sf "$DEPLOY_DIR/bin/changesets-to-parquet" /usr/local/bin/changesets-to-parquet
     sudo ln -sf "$DEPLOY_DIR/bin/changeset-replication-worker" /usr/local/bin/changeset-replication-worker
 fi

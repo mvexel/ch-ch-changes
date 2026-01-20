@@ -47,16 +47,29 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 # Update symlinks
-echo -e "\n${YELLOW}[1/3] Updating symlinks...${NC}"
+echo -e "\n${YELLOW}[1/4] Updating symlinks...${NC}"
 ln -sfn "$RELEASE_DIR" "$DEPLOY_DIR/releases/current"
 ln -sfn "$DEPLOY_DIR/releases/current/changeset-server" "$DEPLOY_DIR/bin/changeset-server"
+ln -sfn "$DEPLOY_DIR/releases/current/changesets-to-parquet" "$DEPLOY_DIR/bin/changesets-to-parquet"
+ln -sfn "$DEPLOY_DIR/releases/current/changeset-replication-worker" "$DEPLOY_DIR/bin/changeset-replication-worker"
+
+# Update /usr/local/bin symlinks if directory exists
+if [ -d "/usr/local/bin" ]; then
+    echo "Updating /usr/local/bin symlinks..."
+    sudo ln -sf "$DEPLOY_DIR/bin/changeset-server" /usr/local/bin/changeset-server
+    sudo ln -sf "$DEPLOY_DIR/bin/changesets-to-parquet" /usr/local/bin/changesets-to-parquet
+    sudo ln -sf "$DEPLOY_DIR/bin/changeset-replication-worker" /usr/local/bin/changeset-replication-worker
+fi
 
 # Restart service
-echo -e "\n${YELLOW}[2/3] Restarting service...${NC}"
-sudo systemctl restart changeset-server
+echo -e "\n${YELLOW}[2/4] Stopping service...${NC}"
+sudo systemctl stop changeset-server
+
+echo -e "\n${YELLOW}[3/4] Starting service...${NC}"
+sudo systemctl start changeset-server
 
 # Health check
-echo -e "\n${YELLOW}[3/3] Running health checks...${NC}"
+echo -e "\n${YELLOW}[4/4] Running health checks...${NC}"
 sleep 3
 
 if systemctl is-active --quiet changeset-server; then
