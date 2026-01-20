@@ -83,3 +83,73 @@ The API uses a local SQLite database for authentication (`auth.db` by default).
 -   **Partitioning**: Data is partitioned by time (Year/Month). Delta files are hourly (YYYYMMDDHH.parquet).
 -   **Deduplication**: Query-time dedup uses `replication_sequence` (higher = newer; base is NULL).
 -   **Indexes**: No partition stats index; filesystem paths are the only index.
+
+## 🔧 Implementation Details
+
+### Replication Worker Internals
+-   **Network Resilience**: The `retry_network` function (lines 19-69 in `changeset-replication-worker.rs`) handles transient failures with exponential backoff. Retries on timeouts, connection errors, request/body errors, and 5xx/429 responses. Max 5 retries with 2s initial backoff.
+-   **HTTP Client Config**: Uses 180s timeout, 30s connect timeout, TCP keepalive (60s), and connection pooling to maintain stable connections to planet.openstreetmap.org.
+-   **BatchAccumulator**: Aggregates changesets across multiple replication sequences into hourly batches. Flushes on hour boundary crossings or when `max_batch_sequences` (default 120) is reached.
+-   **State Management**: OSM's replication state files are off-by-one (state file for sequence N contains sequence N-1). The worker normalizes this internally.
+
+### API Query Engine
+-   **QueryEngine** (`api/query/engine.rs`): Wraps DuckDB connection pool. Uses `r2d2` for connection management.
+-   **Partition Discovery** (`api/query/partition.rs`): Watches filesystem for new Parquet files using `notify`. Caches partition metadata.
+-   **Format Support**: JSON (default), JSONL (streaming), XML. See `api/format/` for serialization logic.
+
+### Authentication Flow
+1.  User visits `/auth/osm/start` → redirected to OSM OAuth
+2.  OSM redirects back to `/auth/osm/callback` with auth code
+3.  Server exchanges code for access token, fetches user info
+4.  API key generated and stored in SQLite (`AUTH_DB_PATH`)
+5.  Subsequent requests use `Authorization: Bearer <key>` header
+
+## 🐛 Common Issues
+
+| Symptom | Likely Cause | Fix |
+| :--- | :--- | :--- |
+| "connection closed before message completed" | Network instability to OSM servers | Already handled by retry logic; increase `MAX_RETRIES` if persistent |
+| Replication falls behind | Too many sequences queued | Use `--max-sequences-per-run` to limit catch-up batches |
+| "state missing sequenceNumber" | Corrupt or invalid state file | Delete `state.yaml` and set `REPLICATION_START_SEQUENCE` |
+| Query returns stale data | Partition cache not refreshed | Server watches for file changes; check filesystem permissions |
+| OAuth callback fails | Misconfigured `OSM_OAUTH_REDIRECT_URL` | Ensure URL matches exactly what's registered at osm.org |
+
+## 📁 Data Directory Structure
+
+```
+$DATA_PATH/
+├── base/                           # From converter (full dump)
+│   └── year=YYYY/
+│       └── month=MM.parquet
+├── delta/                          # From replication worker
+│   ├── year=YYYY/
+│   │   └── month=MM/
+│   │       └── YYYYMMDDHH.parquet  # Hourly batches
+│   ├── state.yaml                  # Current replication position
+│   └── tmp/                        # Working directory for downloads
+└── indexes/                        # Optional DuckDB indexes (if enabled)
+```
+
+## 🔄 Data Flow
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  OSM Planet     │────▶│    Converter     │────▶│  base/*.parquet │
+│  Dump (.bz2)    │     │                  │     │                 │
+└─────────────────┘     └──────────────────┘     └────────┬────────┘
+                                                          │
+┌─────────────────┐     ┌──────────────────┐     ┌────────▼────────┐
+│  OSM Replication│────▶│ Replication      │────▶│ delta/*.parquet │
+│  Feed (minutely)│     │ Worker           │     │                 │
+└─────────────────┘     └──────────────────┘     └────────┬────────┘
+                                                          │
+                        ┌──────────────────┐     ┌────────▼────────┐
+                        │   API Server     │◀────│   DuckDB        │
+                        │   (Axum)         │     │   (in-memory)   │
+                        └────────┬─────────┘     └─────────────────┘
+                                 │
+                        ┌────────▼─────────┐
+                        │   HTTP Clients   │
+                        │   (JSON/XML/JSONL│
+                        └──────────────────┘
+```
