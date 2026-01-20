@@ -22,13 +22,23 @@ pub async fn auth_middleware(
         return Ok(next.run(req).await);
     }
 
+    // If authentication is not required, allow all requests through
+    if !state.auth.config.require_auth {
+        return Ok(next.run(req).await);
+    }
+
     let raw_key = extract_api_key(req.headers(), req.uri()).ok_or_else(|| {
         ApiError::unauthorized(
             "Missing API key. Use Authorization: Bearer <key> or X-API-Key header.",
         )
     })?;
 
-    let key_hash = hash_key(&state.auth.config.key_secret, &raw_key);
+    let key_secret = state.auth.config.key_secret.as_ref().ok_or_else(|| {
+        tracing::error!("AUTH_KEY_SECRET not configured but auth is required");
+        ApiError::internal_error("Authentication configuration error")
+    })?;
+
+    let key_hash = hash_key(key_secret, &raw_key);
     let auth_key = state
         .auth
         .db

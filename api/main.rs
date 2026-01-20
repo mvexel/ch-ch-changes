@@ -42,11 +42,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::error!("Auth configuration error: {}", e);
         e
     })?;
+
+    if auth_config.require_auth {
+        tracing::info!("Authentication: ENABLED");
+    } else {
+        tracing::info!("Authentication: DISABLED");
+    }
+
     let auth_state = auth::AuthState::new(auth_config).await.map_err(|e| {
         tracing::error!("Failed to initialize auth state: {}", e);
         e
     })?;
-    tracing::info!("Auth DB: {}", auth_state.config.db_path.display());
+
+    if auth_state.config.require_auth {
+        tracing::info!("Auth DB: {}", auth_state.config.db_path.display());
+    }
 
     let state = AppState {
         engine: Arc::new(engine),

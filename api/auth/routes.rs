@@ -42,6 +42,13 @@ pub struct MeResponse {
 }
 
 pub async fn oauth_start(State(state): State<AppState>) -> Result<Redirect, ApiError> {
+    let client_id = state.auth.config.oauth_client_id.as_ref().ok_or_else(|| {
+        ApiError::internal_error("OAuth not configured")
+    })?;
+    let redirect_url = state.auth.config.oauth_redirect_url.as_ref().ok_or_else(|| {
+        ApiError::internal_error("OAuth not configured")
+    })?;
+
     let oauth_state = state.auth.issue_state().await;
     let mut url = reqwest::Url::parse(&state.auth.config.oauth_authorize_url).map_err(|e| {
         tracing::error!("Invalid OSM OAuth authorize URL: {}", e);
@@ -49,8 +56,8 @@ pub async fn oauth_start(State(state): State<AppState>) -> Result<Redirect, ApiE
     })?;
 
     url.query_pairs_mut()
-        .append_pair("client_id", &state.auth.config.oauth_client_id)
-        .append_pair("redirect_uri", &state.auth.config.oauth_redirect_url)
+        .append_pair("client_id", client_id)
+        .append_pair("redirect_uri", redirect_url)
         .append_pair("response_type", "code")
         .append_pair("scope", &state.auth.config.oauth_scope)
         .append_pair("state", &oauth_state);
@@ -152,15 +159,25 @@ pub async fn get_me(
 }
 
 async fn exchange_code(state: &AppState, code: &str) -> Result<String, ApiError> {
+    let client_id = state.auth.config.oauth_client_id.as_ref().ok_or_else(|| {
+        ApiError::internal_error("OAuth not configured")
+    })?;
+    let client_secret = state.auth.config.oauth_client_secret.as_ref().ok_or_else(|| {
+        ApiError::internal_error("OAuth not configured")
+    })?;
+    let redirect_url = state.auth.config.oauth_redirect_url.as_ref().ok_or_else(|| {
+        ApiError::internal_error("OAuth not configured")
+    })?;
+
     let client = state.auth.http_client.clone();
     let response = client
         .post(&state.auth.config.oauth_token_url)
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
-            ("redirect_uri", &state.auth.config.oauth_redirect_url),
-            ("client_id", &state.auth.config.oauth_client_id),
-            ("client_secret", &state.auth.config.oauth_client_secret),
+            ("redirect_uri", redirect_url),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
         ])
         .header("Accept", "application/json")
         .send()

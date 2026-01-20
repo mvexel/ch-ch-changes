@@ -79,7 +79,9 @@ impl AuthState {
             .context("Failed to revoke existing keys")?;
         let key = generate_api_key();
         let prefix = key.chars().take(8).collect::<String>();
-        let key_hash = hash_key(&self.config.key_secret, &key);
+        let key_secret = self.config.key_secret.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("AUTH_KEY_SECRET not configured"))?;
+        let key_hash = hash_key(key_secret, &key);
         self.db
             .insert_api_key(user_id, &prefix, &key_hash)
             .await
