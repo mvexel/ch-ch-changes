@@ -56,34 +56,34 @@
 
     <h2>Authentication</h2>
     <p>All data endpoints require an API key. Get one by logging in via OSM <a href="/auth/osm/start">here</a>. You will be issued a new API key after. Save it; it will not be shown again. Signing in again rotates the key.</p>
-    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://{{DOMAIN}}/changesets/day/20240115.json</code></pre>
+    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://{{.Host}}/changesets/day/20240115.json</code></pre>
 
     <h2>API Endpoints</h2>
 
     <p><span class="endpoint">GET /health</span> - Health check</p>
-    <pre><code>https://{{DOMAIN}}/health</code></pre>
+    <pre><code>https://{{.Host}}/health</code></pre>
 
     <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}</span> - All changesets on a date 🔐</p>
     <pre><code># XML format (default)
-https://{{DOMAIN}}/changesets/day/20240115
+https://{{.Host}}/changesets/day/20240115
 
 # JSON format
-https://{{DOMAIN}}/changesets/day/20240115.json
+https://{{.Host}}/changesets/day/20240115.json
 
 # JSONL format (one changeset per line, useful for large results)
-https://{{DOMAIN}}/changesets/day/20240115.jsonl</code></pre>
+https://{{.Host}}/changesets/day/20240115.jsonl</code></pre>
 
     <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}</span> - All changesets in a specific hour 🔐</p>
-    <pre><code>https://{{DOMAIN}}/changesets/day/20240115/hour/23.json</code></pre>
+    <pre><code>https://{{.Host}}/changesets/day/20240115/hour/23.json</code></pre>
 
     <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}/minute/{MM}</span> - All changesets in a specific minute 🔐</p>
-    <pre><code>https://{{DOMAIN}}/changesets/day/20240115/hour/23/minute/59.json</code></pre>
+    <pre><code>https://{{.Host}}/changesets/day/20240115/hour/23/minute/59.json</code></pre>
 
     <p><span class="endpoint">GET /meta/state</span> - Replication state info</p>
-    <pre><code>https://{{DOMAIN}}/meta/state</code></pre>
+    <pre><code>https://{{.Host}}/meta/state</code></pre>
 
     <p><span class="endpoint">GET /auth/me</span> - Account limits &amp; usage 🔐</p>
-    <pre><code>https://{{DOMAIN}}/auth/me</code></pre>
+    <pre><code>https://{{.Host}}/auth/me</code></pre>
 
     <h3>Format Options</h3>
 
@@ -108,7 +108,7 @@ https://{{DOMAIN}}/changesets/day/20240115.jsonl</code></pre>
     </ul>
 
     <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
-"https://{{DOMAIN}}/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
+"https://{{.Host}}/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
 
     <p>Remember that <em>OSM usernames are case-sensitive, so <code>alice</code> is probably not the same mapper as <code>Alice</code></em>.</p>
 
