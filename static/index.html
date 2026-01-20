@@ -33,17 +33,17 @@
         ul { padding-left: 20px; }
     </style>
 </head>
-<body>
-    <h1>OSM Bulk Changeset API</h1>
 
-    <p>Query OpenStreetMap changeset metadata in bulk.</p>
+    <h1><img src="CH-CH-CHANGES.png"> ch-ch-changes</h1>
 
-    <p>This service is useful if you want to retrieve metadata for a non-trivial subset of OSM changeset metadata.
-        OSM lets you retrieve up to 100 at the time using the OSM API (<a href="https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets">docs</a>).
-        This service lets you query by minute, hour, day and even day ranges. Additionally, you can filter by user ID and status.
-    </p>
+    <p><em>The missing API for OSM Changeset Metadata queries.</em></p>
 
-    <h3>About Changesets</h3>
+    <p>The OpenStreetMap API <a href="https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets" target="_blank">lets you query changeset metadata</a>,
+        but the usefulness of that API is limited by a result maximum of 100.</p>
+
+    <p>This API lets you query by entire days, hours, minutes, or a range of changeset ids, and supports additional output formats like `jsonl` for efficient streaming processing.</p>
+
+    <h2>About Changesets</h2>
 
     <p>Each time an OpenStreetMap contributor uploads their edits, a changeset gets created.
         A changeset has two components: <strong>metadata</strong> and <strong>map changes</strong>. The <strong>metadata</strong> part, which is what this service provides,
@@ -54,43 +54,36 @@
         There are some links below if you want to learn more.
     </p>
 
-    <h3>Data Updates</h3>
-
-    <p>Changeset data is updated weekly using the canonical changeset archive file OSM makes available, and continuously via replication diffs written in hourly batches. Check the <code>/meta/state</code> endpoint for the latest changeset info.</p>
-
     <h2>Authentication</h2>
     <p>All data endpoints require an API key. Get one by logging in via OSM <a href="/auth/osm/start">here</a>. You will be issued a new API key after. Save it; it will not be shown again. Signing in again rotates the key.</p>
-    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://DOMAIN/changesets/day/20240115.json</code></pre>
+    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://{{DOMAIN}}/changesets/day/20240115.json</code></pre>
 
     <h2>API Endpoints</h2>
 
     <p><span class="endpoint">GET /health</span> - Health check</p>
-    <pre><code>https://DOMAIN/health</code></pre>
+    <pre><code>https://{{DOMAIN}}/health</code></pre>
 
     <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}</span> - All changesets on a date 🔐</p>
     <pre><code># XML format (default)
-https://DOMAIN/changesets/day/20240115
+https://{{DOMAIN}}/changesets/day/20240115
 
 # JSON format
-https://DOMAIN/changesets/day/20240115.json
+https://{{DOMAIN}}/changesets/day/20240115.json
 
 # JSONL format (one changeset per line, useful for large results)
-https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
+https://{{DOMAIN}}/changesets/day/20240115.jsonl</code></pre>
 
     <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}</span> - All changesets in a specific hour 🔐</p>
-    <pre><code>https://DOMAIN/changesets/day/20240115/hour/23.json</code></pre>
+    <pre><code>https://{{DOMAIN}}/changesets/day/20240115/hour/23.json</code></pre>
 
     <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}/minute/{MM}</span> - All changesets in a specific minute 🔐</p>
-    <pre><code>https://DOMAIN/changesets/day/20240115/hour/23/minute/59.json</code></pre>
-
-    <p><span class="endpoint">GET /changesets/date/from/{start}/to/{end}</span> - Date range (entire days) <strong>response can be huge!</strong> 🔐</p>
-    <pre><code>https://DOMAIN/changesets/date/from/20240101/to/20240131.json</code></pre>
+    <pre><code>https://{{DOMAIN}}/changesets/day/20240115/hour/23/minute/59.json</code></pre>
 
     <p><span class="endpoint">GET /meta/state</span> - Replication state info</p>
-    <pre><code>https://DOMAIN/meta/state</code></pre>
+    <pre><code>https://{{DOMAIN}}/meta/state</code></pre>
 
     <p><span class="endpoint">GET /auth/me</span> - Account limits &amp; usage 🔐</p>
-    <pre><code>https://DOMAIN/auth/me</code></pre>
+    <pre><code>https://{{DOMAIN}}/auth/me</code></pre>
 
     <h3>Format Options</h3>
 
@@ -115,7 +108,7 @@ https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
     </ul>
 
     <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
-"https://DOMAIN/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
+"https://{{DOMAIN}}/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
 
     <p>Remember that <em>OSM usernames are case-sensitive, so <code>alice</code> is probably not the same mapper as <code>Alice</code></em>.</p>
 
@@ -146,7 +139,49 @@ https://DOMAIN/changesets/day/20240115.jsonl</code></pre>
 
     <h2>Rate Limits</h2>
 
-    <p>Daily and monthly request limits can be set per account. Check <code>/auth/me</code> for your current limits.</p>
+    <p>Daily and monthly request limits may be set per account. Check <code>/auth/me</code> for your current limits.</p>
+
+    <h2>Technical details</h2>
+    <p>The server consists of a converter <code>changesets-to-parquet</code> for seeding the API with a changeset archive file from OSM, a standalone server binary <code>changeset-server</code> and a replication binary <code>changeset-replication-worker</code> that backfills the changeset data and fetches new replication files from OSM every minute.</p>
+
+    <h3>Database-less Architecture</h3>
+    <p>The API has no traditional database backend. Data is stored as hive-partitioned Parquet files (<code>year=YYYY/month=MM/*.parquet</code>), queried directly using DuckDB's embedded SQL engine. Some benefits (not all of which we actually use today) are:</p>
+    <ul>
+        <li>No indexes to build or caches to prime on startup. Queries run directly against columnar files</li>
+        <li>Partition pruning happens via directory structure rather than B-trees</li>
+        <li>Files can live on any storage backend DuckDB can read (S3, NFS, local SSD)</li>
+        <li>Historical data is immutable parquet files that never change</li>
+    </ul>
+
+    <h3>Lambda Architecture</h3>
+    <p>Because Parquet files don't support CRUD operations, the system uses a lambda architecture with two layers:</p>
+    <ul>
+        <li><strong>Base layer:</strong> Immutable weekly snapshots from planet.osm.org (full rebuilds of historical data)</li>
+        <li><strong>Delta layer:</strong> Streaming updates from minutely replication feeds, batched into hourly Parquet files</li>
+    </ul>
+    <p>The query engine reads both layers simultaneously and deduplicates using the <code>replication_sequence</code> field (higher = newer, <code>NULL</code> = base). This provides up-to-the-minute freshness without rebuilding multi-GB base files.</p>
+
+    <h3>Smart Batching</h3>
+    <p>The replication worker doesn't write one file per minute, that would create millions of tiny files. Instead, it uses a <code>BatchAccumulator</code> that aggregates minutely updates into hourly Parquet files, flushing when:</p>
+    <ul>
+        <li>An hour boundary is crossed (natural time partition)</li>
+        <li>120 sequences accumulate (safety limit to prevent memory bloat)</li>
+        <li>The worker shuts down (graceful flush of partial batches)</li>
+    </ul>
+    <p>This balances write efficiency (fewer files, better compression) with query freshness (max 1 hour lag during catch-up).</p>
+
+    <h3>Zero-Downtime Updates</h3>
+    <p>The API server watches the filesystem using <code>notify</code> and automatically picks up new partition files as the replication worker writes them. When a new <code>YYYYMMDDHH.parquet</code> file appears, it's immediately available for queries.</p>
+
+    <h3>Trade-offs and quirks</h3>
+    <ul>
+        <li>Date range queries are limited to 1 day maximum to prevent out-of-memory errors. For larger ranges, paginate or use multiple requests.</li>
+        <li>Queries returning more than 100,000 changesets are rejected. Use filters (<code>user</code>, <code>uid</code>, <code>open</code>) or pagination (<code>limit</code>/<code>offset</code>) to narrow results.</li>
+        <li>Query deduplication happens at query-time (not write-time), so every query scans both base + delta layers. Simplifies writing but slows reads. Mitigated somewhat by the daily compacting strategy.</li>
+        <li>When backfilling historical data, hourly batching means new data appears with up to 1-hour granularity. This is not an issue once the data is caught up.</li>
+        <li>The API is read-only with fixed endpoints (day/hour/minute). There's no SQL interface or arbitrary filtering. No spatial queries for example.</li>
+        <li>OSM's replication state files are off-by-one (state file N contains sequence N-1's timestamp). The worker normalizes this internally, but it adds some complexity.</li>
+    </ul>
 
     <h2>See also</h2>
     <ul>
