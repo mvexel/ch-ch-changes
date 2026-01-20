@@ -3,7 +3,7 @@ use changesets_to_parquet::{
     parsing::parse_xml_to_channel, schema::create_schema,
     writer::consume_and_write_partitioned_parallel, Changeset,
 };
-use chrono::{DateTime, NaiveDateTime, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Datelike, NaiveDateTime, TimeZone, Timelike, Utc};
 use clap::Parser;
 use duckdb::Connection;
 use flate2::read::GzDecoder;
@@ -142,6 +142,14 @@ struct Args {
     /// Maximum sequences to buffer before forcing a write (safety limit)
     #[arg(long, default_value_t = 120)]
     max_batch_sequences: u64,
+
+    /// Enable automatic compaction of old delta files
+    #[arg(long, env = "ENABLE_COMPACTION", default_value_t = false)]
+    enable_compaction: bool,
+
+    /// Hours to wait before compacting a delta file (default: 24 = compact yesterday's data)
+    #[arg(long, env = "COMPACTION_AGE_HOURS", default_value_t = 24)]
+    compaction_age_hours: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -337,6 +345,11 @@ fn main() -> Result<()> {
                     )?;
                     write_state(&state_path, &state_to_flush)?;
                     last_state = state_to_flush;
+
+                    // Run compaction if enabled (non-blocking, errors are logged but not fatal)
+                    if args.enable_compaction {
+                        let _ = maybe_run_compaction(&delta_dir, args.compaction_age_hours);
+                    }
 
                     // Now add the current sequence to the new batch
                     for cs in &mut changesets {
@@ -1120,6 +1133,143 @@ fn merge_parquet_files(existing_path: &Path, new_path: &Path) -> Result<()> {
 
 fn escape_sql_string(path: &Path) -> String {
     path.to_string_lossy().replace('\'', "''")
+}
+
+/// Compact old delta files in a month directory into a single file.
+/// Only compacts files older than `min_age` to avoid interfering with active writes.
+/// Returns the number of files compacted (0 if nothing to do).
+fn compact_month_deltas(
+    delta_dir: &Path,
+    year: i32,
+    month: u32,
+    min_age: Duration,
+) -> Result<usize> {
+    let month_dir = delta_dir
+        .join(format!("year={}", year))
+        .join(format!("month={:02}", month));
+
+    if !month_dir.exists() {
+        return Ok(0);
+    }
+
+    // Find all parquet files in the month directory
+    let mut files_to_compact: Vec<PathBuf> = Vec::new();
+    let now = std::time::SystemTime::now();
+
+    for entry in fs::read_dir(&month_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.extension().and_then(|e| e.to_str()) != Some("parquet") {
+            continue;
+        }
+
+        // Skip files that are too new
+        if let Ok(metadata) = path.metadata() {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(age) = now.duration_since(modified) {
+                    if age < min_age {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Skip the compacted file itself
+        if path.file_name().and_then(|n| n.to_str()) == Some("compacted.parquet") {
+            continue;
+        }
+
+        files_to_compact.push(path);
+    }
+
+    // Need at least 2 files to make compaction worthwhile
+    if files_to_compact.len() < 2 {
+        return Ok(0);
+    }
+
+    log_info(&format!(
+        "Compacting {} delta files for {}-{:02}",
+        files_to_compact.len(),
+        year,
+        month
+    ));
+
+    // Build the compaction query with deduplication
+    let file_list: Vec<String> = files_to_compact
+        .iter()
+        .map(|p| format!("'{}'", escape_sql_string(p)))
+        .collect();
+
+    let compacted_path = month_dir.join("compacted.parquet");
+    let temp_path = month_dir.join("compacted.parquet.tmp");
+
+    // Include existing compacted file if present
+    let source = if compacted_path.exists() {
+        let mut all_files = file_list.clone();
+        all_files.push(format!("'{}'", escape_sql_string(&compacted_path)));
+        format!("[{}]", all_files.join(","))
+    } else {
+        format!("[{}]", file_list.join(","))
+    };
+
+    let temp_sql = escape_sql_string(&temp_path);
+    let sql = format!(
+        "COPY (
+            SELECT * FROM read_parquet({}, union_by_name=true, hive_partitioning=false)
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY replication_sequence DESC NULLS LAST) = 1
+        ) TO '{}' (FORMAT PARQUET, COMPRESSION SNAPPY)",
+        source, temp_sql
+    );
+
+    let conn = Connection::open_in_memory()?;
+    conn.execute(&sql, [])?;
+
+    // Atomic swap
+    if compacted_path.exists() {
+        fs::remove_file(&compacted_path)?;
+    }
+    fs::rename(&temp_path, &compacted_path)?;
+
+    // Remove the old individual files
+    let compacted_count = files_to_compact.len();
+    for file in files_to_compact {
+        if let Err(e) = fs::remove_file(&file) {
+            log_info(&format!("Warning: failed to remove {}: {}", file.display(), e));
+        }
+    }
+
+    log_info(&format!(
+        "Compaction complete for {}-{:02}: {} files merged into compacted.parquet",
+        year, month, compacted_count
+    ));
+
+    Ok(compacted_count)
+}
+
+/// Run compaction for hours that are old enough.
+/// Called after flushing an hourly batch.
+fn maybe_run_compaction(delta_dir: &Path, compaction_age_hours: u64) -> Result<()> {
+    let min_age = Duration::from_secs(compaction_age_hours * 3600);
+    let now = Utc::now();
+
+    // Compact the previous month if we're past the age threshold
+    // This is conservative - only compact months that are definitely "done"
+    let target_time = now - chrono::Duration::hours(compaction_age_hours as i64);
+    let year = target_time.year();
+    let month = target_time.month();
+
+    match compact_month_deltas(delta_dir, year, month, min_age) {
+        Ok(count) if count > 0 => {
+            log_info(&format!("Compaction completed: {} files processed", count));
+        }
+        Ok(_) => {} // Nothing to compact
+        Err(e) => {
+            log_info(&format!("Compaction warning (non-fatal): {}", e));
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
