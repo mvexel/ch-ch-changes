@@ -545,41 +545,32 @@ mod serde_duckdb {
     use std::collections::HashMap;
 
     pub fn from_row(row: &Row) -> Result<Changeset, duckdb::Error> {
-        // Manually map fields because automated serde integration might be tricky with DuckDB's types
-        // especially for the HashMap tags.
-        // For now, let's try to map field by field.
+        // Helper macro to reduce boilerplate for optional field extraction
+        macro_rules! get_opt {
+            ($field:expr) => {
+                row.get($field).ok()
+            };
+        }
 
         let id: i64 = row.get("id")?;
-        let replication_sequence: Option<u64> = row
-            .get::<_, i64>("replication_sequence")
-            .ok()
-            .map(|v| v as u64);
-        let created_at = row
-            .get::<_, Value>("created_at")
-            .ok()
-            .and_then(timestamp_millis_from_value);
-        let closed_at = row
-            .get::<_, Value>("closed_at")
-            .ok()
-            .and_then(timestamp_millis_from_value);
+        let replication_sequence = get_opt!("replication_sequence").map(|v: i64| v as u64);
+        let created_at = get_opt!("created_at").and_then(timestamp_millis_from_value);
+        let closed_at = get_opt!("closed_at").and_then(timestamp_millis_from_value);
         let open: bool = row.get("open")?;
-        let user: Option<String> = row.get("user").ok();
-        let uid: Option<i64> = row.get("uid").ok();
-        let min_lat: Option<f64> = row.get("min_lat").ok();
-        let min_lon: Option<f64> = row.get("min_lon").ok();
-        let max_lat: Option<f64> = row.get("max_lat").ok();
-        let max_lon: Option<f64> = row.get("max_lon").ok();
-        let num_changes: u32 = row.get::<_, i32>("num_changes")? as u32; // DuckDB might return i32
-        let comments_count: u32 = row.get::<_, i32>("comments_count")? as u32;
-        let description: Option<String> = row.get("description").ok();
+        let user = get_opt!("user");
+        let uid = get_opt!("uid");
+        let min_lat = get_opt!("min_lat");
+        let min_lon = get_opt!("min_lon");
+        let max_lat = get_opt!("max_lat");
+        let max_lon = get_opt!("max_lon");
+        let num_changes = row.get::<_, i32>("num_changes")? as u32;
+        let comments_count = row.get::<_, i32>("comments_count")? as u32;
+        let description = get_opt!("description");
 
-        // Tags handling: Tag field is now converted to JSON string by QueryBuilder
-        let tags_json: Option<String> = row.get("tags").ok();
-        let tags: HashMap<String, String> = if let Some(json_str) = tags_json {
-            serde_json::from_str(&json_str).unwrap_or_default()
-        } else {
-            HashMap::new()
-        };
+        // Parse tags from JSON string (QueryBuilder converts MAP to JSON)
+        let tags = get_opt!("tags")
+            .and_then(|json_str: String| serde_json::from_str(&json_str).ok())
+            .unwrap_or_default();
 
         Ok(Changeset {
             id,
