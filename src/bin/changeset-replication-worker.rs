@@ -21,8 +21,8 @@ fn retry_network<F, T>(mut operation: F) -> Result<T>
 where
     F: FnMut() -> Result<T>,
 {
-    const MAX_RETRIES: u32 = 3;
-    const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+    const MAX_RETRIES: u32 = 5;
+    const INITIAL_BACKOFF: Duration = Duration::from_secs(2);
 
     let mut attempt = 0;
     let mut backoff = INITIAL_BACKOFF;
@@ -34,14 +34,18 @@ where
                 // Check if error is retryable
                 let is_retryable = if let Some(reqwest_err) = err.downcast_ref::<reqwest::Error>() {
                     // Retry on network errors (timeouts, connection failures) and server errors (5xx)
-                    if reqwest_err.is_timeout() || reqwest_err.is_connect() {
+                    if reqwest_err.is_timeout()
+                        || reqwest_err.is_connect()
+                        || reqwest_err.is_request()
+                        || reqwest_err.is_body()
+                    {
                         true
                     } else if let Some(status) = reqwest_err.status() {
-                        // Retry on server errors (5xx) but not client errors (4xx)
-                        status.is_server_error()
+                        // Retry on server errors (5xx) and 429 (rate limit)
+                        status.is_server_error() || status.as_u16() == 429
                     } else {
-                        // Other reqwest errors (e.g., redirect loop) - don't retry
-                        false
+                        // Other reqwest errors - be permissive and retry
+                        true
                     }
                 } else {
                     // Non-reqwest errors (IO, parsing, etc.) - don't retry
@@ -424,7 +428,11 @@ fn main() -> Result<()> {
 
 fn build_client() -> Result<Client> {
     Client::builder()
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(180))
+        .connect_timeout(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(2)
+        .tcp_keepalive(Duration::from_secs(60))
         .user_agent(format!(
             "changeset-replication-worker/{}",
             env!("CARGO_PKG_VERSION")
