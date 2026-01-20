@@ -258,20 +258,6 @@ fn setup_watcher(
                             if watcher.watch(&path, RecursiveMode::NonRecursive).is_ok() {
                                 watched += 1;
                             }
-                            // Also watch month directories
-                            if let Ok(month_entries) = std::fs::read_dir(&path) {
-                                for month_entry in month_entries.flatten() {
-                                    let month_path = month_entry.path();
-                                    if month_path.is_dir() {
-                                        if watcher
-                                            .watch(&month_path, RecursiveMode::NonRecursive)
-                                            .is_ok()
-                                        {
-                                            watched += 1;
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
