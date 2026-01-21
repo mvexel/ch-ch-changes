@@ -630,17 +630,18 @@ mod tests {
 
         let engine = crate::query::QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
         let auth_state = AuthState::new(AuthConfig {
-            oauth_client_id: "test".to_string(),
-            oauth_client_secret: "test".to_string(),
-            oauth_redirect_url: "http://localhost/auth/osm/callback".to_string(),
+            oauth_client_id: Some("test".to_string()),
+            oauth_client_secret: Some("test".to_string()),
+            oauth_redirect_url: Some("http://localhost/auth/osm/callback".to_string()),
             oauth_authorize_url: "https://example.com".to_string(),
             oauth_token_url: "https://example.com".to_string(),
             oauth_user_details_url: "https://example.com".to_string(),
             oauth_scope: "read_prefs".to_string(),
-            key_secret: "test-secret".to_string(),
+            key_secret: Some("test-secret".to_string()),
             db_path: PathBuf::from(":memory:"),
             default_daily_limit: None,
             default_monthly_limit: None,
+            require_auth: false,
         })
         .await
         .expect("auth");

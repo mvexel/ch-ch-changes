@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod builder;
+#[cfg(feature = "indexing")]
 pub mod indexing;
 pub mod models;
 pub mod parsing;

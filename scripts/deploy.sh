@@ -23,9 +23,9 @@ if ! command -v cargo &> /dev/null; then
     fi
 fi
 
-# Step 1: Build the release binary
+# Step 1: Build the release binaries
 echo -e "\n${YELLOW}[1/8] Building release binaries...${NC}"
-cargo build --release --bin changeset-server --bin changesets-to-parquet --bin changeset-replication-worker
+cargo build --release --workspace
 
 # Step 2: Create release directory
 echo -e "\n${YELLOW}[2/8] Creating release directory...${NC}"

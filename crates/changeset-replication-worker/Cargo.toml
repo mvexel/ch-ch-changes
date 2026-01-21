@@ -1,0 +1,20 @@
+[package]
+name = "changeset-replication-worker"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "changeset-replication-worker"
+path = "src/main.rs"
+
+[dependencies]
+changesets-core = { path = "../changesets-core" }
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+duckdb.workspace = true
+flate2.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

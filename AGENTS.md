@@ -6,44 +6,78 @@ This project provides high-performance access to OpenStreetMap (OSM) changeset m
 2.  **Replication**: A worker daemon that fetches live minutely updates from OSM and appends them as hourly delta Parquet files.
 3.  **API**: A read-only HTTP server (Axum) allowing users to query this data via REST endpoints or SQL-like logic, backed by DuckDB.
 
-## 🗺️ architectural Map
+## 🗺️ Architectural Map
 
-### 1. Core Logic (`src/`)
-Shared library code used by both the converter and the worker.
--   `parsing.rs`: Streaming XML parser (using `quick-xml`) that converts OSM XML events into Rust structs.
--   `schema.rs`: Defines the Arrow/Parquet schema for changesets.
--   `writer.rs`: Handles writing Arrow batches to Parquet files, including partitioning logic.
+### Cargo Workspace Structure
 
-### 2. Binaries
--   **Converter** (`src/main.rs`): CLI tool for bulk processing.
--   **Worker** (`src/bin/changeset-replication-worker.rs`): Daemon for keeping data up-to-date.
--   **API Server** (`api/main.rs`): The public-facing web server.
+The project is organized as a Cargo workspace with four crates:
 
-### 3. API Structure (`api/`)
--   `auth/`: Authentication logic using SQLite to manage API keys.
--   `query/`: DuckDB query engine wrappers.
--   `routes/`: API endpoint definitions (REST).
--   `models/`: API-specific data models (serde structs).
+```
+changesets-to-parquet/
+├── Cargo.toml                          # Workspace root
+├── crates/
+│   ├── changesets-core/                # Shared library
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs                  # Changeset struct + module exports
+│   │       ├── schema.rs               # Arrow/Parquet schema (source of truth)
+│   │       ├── parsing.rs              # XML → Rust streaming parser
+│   │       ├── writer.rs               # Partitioned Parquet file writing
+│   │       ├── builder.rs              # Arrow RecordBatch builders
+│   │       ├── models.rs               # Partition keys, stats
+│   │       └── indexing.rs             # Optional index generation (feature-gated)
+│   │
+│   ├── changesets-to-parquet/          # Converter CLI
+│   │   ├── Cargo.toml
+│   │   └── src/main.rs
+│   │
+│   ├── changeset-replication-worker/   # Replication daemon
+│   │   ├── Cargo.toml
+│   │   └── src/main.rs
+│   │
+│   └── changeset-server/               # HTTP API
+│       ├── Cargo.toml
+│       └── src/
+│           ├── main.rs
+│           ├── auth/                   # OAuth + API key authentication
+│           ├── query/                  # DuckDB query engine
+│           ├── routes/                 # REST endpoints
+│           ├── format/                 # JSON/JSONL/XML serialization
+│           ├── models/                 # API-specific data models
+│           ├── state.rs
+│           └── constants.rs
+```
 
-### 4. Infrastructure (`scripts/`, `systemd/`)
--   Deployment scripts (`deploy.sh`, `rollback.sh`).
--   Systemd unit files for running the server and worker as services.
+### Crate Responsibilities
+
+| Crate | Purpose | Key Dependencies |
+|-------|---------|------------------|
+| **changesets-core** | Shared types and logic | arrow, parquet, quick-xml, serde, duckdb (optional) |
+| **changesets-to-parquet** | CLI converter for bulk planet dumps | changesets-core, bzip2, clap |
+| **changeset-replication-worker** | Daemon for minutely replication | changesets-core, reqwest, flate2, duckdb |
+| **changeset-server** | HTTP API server | changesets-core, axum, tokio, duckdb, r2d2 |
+
+**Important:** The `indexing` module in `changesets-core` is behind the `indexing` feature flag and is only enabled for the converter binary.
 
 ## 🛠️ Development & Workflows
 
 ### Build & Run
+
 ```bash
-# Build all binaries
-cargo build --release
+# Build all workspace crates
+cargo build --workspace --release
 
-# Run Unit Tests
-cargo test
+# Run specific binary
+cargo run -p changesets-to-parquet -- --input test.osm.bz2 --output-dir ./output --partition
+cargo run -p changeset-replication-worker -- --help
+cargo run -p changeset-server
 
-# Run API Server (Local)
-DATA_PATH=./data cargo run --bin changeset-server
+# Run tests
+cargo test --workspace
 
-# Run Converter (Example)
-cargo run --bin changesets-to-parquet -- --input test.osm.bz2 --output output.parquet
+# Build individual crate
+cd crates/changesets-core
+cargo build --features indexing
 ```
 
 ### Load Testing
@@ -58,24 +92,25 @@ k6 run loadtest/scenarios/baseline-test.js
 
 ### Database & Auth
 The API uses a local SQLite database for authentication (`auth.db` by default).
--   **Middleware**: `api/auth/middleware.rs` handles `Authorization: Bearer <key>` validation.
+-   **Middleware**: `crates/changeset-server/src/auth/middleware.rs` handles `Authorization: Bearer <key>` validation.
 
 ## 📐 Coding Conventions
 
 -   **Error Handling**: Use `anyhow` for app-level errors. Specific library errors should be wrapped or mapped.
--   **Async Runtime**: `tokio` is the runtime. The API is fully async; the converter is largely synchronous/threaded CPU-bound work.
+-   **Async Runtime**: `tokio` is the runtime. The API is fully async; the converter and worker are synchronous/threaded CPU-bound work.
 -   **Logging**: Use the `tracing` crate. `info!` for general ops, `debug!` for verbose flow, `error!` for failures.
--   **Dependencies**: Check `Cargo.toml`. `duckdb` is used for querying Parquet files. `axum` is the web framework.
+-   **Dependencies**: Managed at workspace level in root `Cargo.toml`. Individual crates use `workspace = true` for version consistency.
 
 ## 🔑 Key Files to Know
 
 | File Path | Purpose |
 | :--- | :--- |
-| `src/schema.rs` | **Source of Truth** for the Parquet schema. Edit this to add columns. |
-| `src/parsing.rs` | Logic for turning XML tags into struct fields. |
-| `api/routes/changesets.rs` | Main logic for querying/filtering changesets. |
-| `api/query/engine.rs` | Where DuckDB SQL queries are constructed and executed. |
-| `src/bin/changeset-replication-worker.rs` | Logic for handling state and fetching upstream updates. |
+| `crates/changesets-core/src/schema.rs` | **Source of Truth** for the Parquet schema. Edit this to add columns. |
+| `crates/changesets-core/src/parsing.rs` | Logic for turning XML tags into struct fields. |
+| `crates/changesets-core/src/lib.rs` | Canonical Changeset struct definition. |
+| `crates/changeset-server/src/routes/changesets.rs` | Main logic for querying/filtering changesets. |
+| `crates/changeset-server/src/query/engine.rs` | Where DuckDB SQL queries are constructed and executed. |
+| `crates/changeset-replication-worker/src/main.rs` | Logic for handling state and fetching upstream updates. |
 
 ## 🧠 Context for AI
 -   **Data Model**: "Changesets" are metadata about a set of edits in OSM. They contain a user, timestamp, bbox, and tags (key-value pairs).
@@ -87,15 +122,15 @@ The API uses a local SQLite database for authentication (`auth.db` by default).
 ## 🔧 Implementation Details
 
 ### Replication Worker Internals
--   **Network Resilience**: The `retry_network` function (lines 19-69 in `changeset-replication-worker.rs`) handles transient failures with exponential backoff. Retries on timeouts, connection errors, request/body errors, and 5xx/429 responses. Max 5 retries with 2s initial backoff.
+-   **Network Resilience**: The `retry_network` function (lines 19-69 in `crates/changeset-replication-worker/src/main.rs`) handles transient failures with exponential backoff. Retries on timeouts, connection errors, request/body errors, and 5xx/429 responses. Max 5 retries with 2s initial backoff.
 -   **HTTP Client Config**: Uses 180s timeout, 30s connect timeout, TCP keepalive (60s), and connection pooling to maintain stable connections to planet.openstreetmap.org.
 -   **BatchAccumulator**: Aggregates changesets across multiple replication sequences into hourly batches. Flushes on hour boundary crossings or when `max_batch_sequences` (default 120) is reached.
 -   **State Management**: OSM's replication state files are off-by-one (state file for sequence N contains sequence N-1). The worker normalizes this internally.
 
 ### API Query Engine
--   **QueryEngine** (`api/query/engine.rs`): Wraps DuckDB connection pool. Uses `r2d2` for connection management.
--   **Partition Discovery** (`api/query/partition.rs`): Watches filesystem for new Parquet files using `notify`. Caches partition metadata.
--   **Format Support**: JSON (default), JSONL (streaming), XML. See `api/format/` for serialization logic.
+-   **QueryEngine** (`crates/changeset-server/src/query/engine.rs`): Wraps DuckDB connection pool. Uses `r2d2` for connection management.
+-   **Partition Discovery** (`crates/changeset-server/src/query/partition.rs`): Watches filesystem for new Parquet files using `notify`. Caches partition metadata.
+-   **Format Support**: JSON (default), JSONL (streaming), XML. See `crates/changeset-server/src/format/` for serialization logic.
 
 ### Authentication Flow
 1.  User visits `/auth/osm/start` → redirected to OSM OAuth
@@ -113,6 +148,7 @@ The API uses a local SQLite database for authentication (`auth.db` by default).
 | "state missing sequenceNumber" | Corrupt or invalid state file | Delete `state.yaml` and set `REPLICATION_START_SEQUENCE` |
 | Query returns stale data | Partition cache not refreshed | Server watches for file changes; check filesystem permissions |
 | OAuth callback fails | Misconfigured `OSM_OAUTH_REDIRECT_URL` | Ensure URL matches exactly what's registered at osm.org |
+| Build error: "use of unresolved module `indexing`" | Building without indexing feature | Add `--features indexing` for converter builds |
 
 ## 📁 Data Directory Structure
 
@@ -120,7 +156,8 @@ The API uses a local SQLite database for authentication (`auth.db` by default).
 $DATA_PATH/
 ├── base/                           # From converter (full dump)
 │   └── year=YYYY/
-│       └── month=MM.parquet
+│       └── month=MM/
+│           └── data.parquet
 ├── delta/                          # From replication worker
 │   ├── year=YYYY/
 │   │   └── month=MM/
@@ -135,21 +172,97 @@ $DATA_PATH/
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
 │  OSM Planet     │────▶│    Converter     │────▶│  base/*.parquet │
-│  Dump (.bz2)    │     │                  │     │                 │
+│  Dump (.bz2)    │     │  (CLI Binary)    │     │                 │
 └─────────────────┘     └──────────────────┘     └────────┬────────┘
                                                           │
 ┌─────────────────┐     ┌──────────────────┐     ┌────────▼────────┐
 │  OSM Replication│────▶│ Replication      │────▶│ delta/*.parquet │
-│  Feed (minutely)│     │ Worker           │     │                 │
+│  Feed (minutely)│     │ Worker (Daemon)  │     │                 │
 └─────────────────┘     └──────────────────┘     └────────┬────────┘
                                                           │
                         ┌──────────────────┐     ┌────────▼────────┐
                         │   API Server     │◀────│   DuckDB        │
-                        │   (Axum)         │     │   (in-memory)   │
+                        │   (Axum/Tokio)   │     │   (in-memory)   │
                         └────────┬─────────┘     └─────────────────┘
                                  │
                         ┌────────▼─────────┐
                         │   HTTP Clients   │
-                        │   (JSON/XML/JSONL│
+                        │   (JSON/XML/JSONL)
                         └──────────────────┘
 ```
+
+## 🚀 Deployment
+
+### Building Release Binaries
+
+```bash
+# Build all binaries for deployment
+cargo build --release --workspace
+
+# Binaries are located at:
+# - target/release/changesets-to-parquet
+# - target/release/changeset-replication-worker
+# - target/release/changeset-server
+```
+
+### Systemd Services
+
+Service files are in `systemd/`:
+- `changeset-server.service` - API server
+- `changeset-replication-worker.service` - Replication daemon
+
+### Deployment Scripts
+
+Located in `scripts/`:
+- `setup.sh` - Initial server setup (creates user, directories, systemd service)
+- `deploy.sh` - Build and deploy new version with zero-downtime swap
+- `rollback.sh` - Rollback to previous version
+- `process_changesets.sh` - One-time full planet dump processing
+- `healthcheck.sh` - Health check script for monitoring
+
+**Deployment workflow:**
+```bash
+# Initial setup (run once)
+sudo ./scripts/setup.sh
+
+# Deploy new version
+./scripts/deploy.sh
+
+# Rollback if needed
+./scripts/rollback.sh <version>
+```
+
+The deployment script:
+1. Builds all workspace binaries in release mode
+2. Creates versioned release directory
+3. Stops service
+4. Updates symlinks atomically
+5. Restarts service
+6. Runs health checks
+
+## 📦 Binary Paths After Deployment
+
+After running `scripts/deploy.sh`, binaries are installed at:
+```
+/opt/changeset-server/bin/changeset-server
+/opt/changeset-server/bin/changesets-to-parquet
+/opt/changeset-server/bin/changeset-replication-worker
+```
+
+And symlinked to:
+```
+/usr/local/bin/changeset-server
+/usr/local/bin/changesets-to-parquet
+/usr/local/bin/changeset-replication-worker
+```
+
+## 🔧 Environment Variables
+
+See `systemd/changeset-server.service` for required environment variables:
+- `DATA_PATH` - Path to Parquet data directory
+- `AUTH_DB_PATH` - SQLite database path for API keys
+- `AUTH_KEY_SECRET` - Secret for API key hashing
+- `OSM_OAUTH_CLIENT_ID` - OAuth client ID
+- `OSM_OAUTH_CLIENT_SECRET` - OAuth client secret
+- `OSM_OAUTH_REDIRECT_URL` - OAuth callback URL
+- `REQUIRE_AUTH` - Enable/disable authentication (default: true)

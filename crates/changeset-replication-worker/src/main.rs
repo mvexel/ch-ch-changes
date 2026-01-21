@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use changesets_to_parquet::{
+use changesets_core::{
     parsing::parse_xml_to_channel, schema::create_schema,
     writer::consume_and_write_partitioned_parallel, Changeset,
 };
