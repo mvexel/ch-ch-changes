@@ -1,0 +1,108 @@
+{
+  "exportedFrom": "Restfox-1.0.0",
+  "collection": [
+    {
+      "_id": "3utvEUSnt7eJofV0BD1Vf",
+      "_type": "request",
+      "name": "changesets minute json",
+      "method": "GET",
+      "body": { "mimeType": "No Body" },
+      "parentId": null,
+      "workspaceId": "ZPwbKiA2bF4Jymj8hKtvG",
+      "url": "{{ BASE_URL }}/changesets/day/20260101/hour/13/minute/00.json",
+      "sortOrder": 4,
+      "parameters": [],
+      "pathParameters": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ TOKEN }}",
+        "disabled": false
+      },
+      "plugins": []
+    },
+    {
+      "_id": "bxwrB85uKoj72ERioXG0r",
+      "_type": "request",
+      "name": "changesets day jsonl",
+      "method": "GET",
+      "body": { "mimeType": "No Body" },
+      "parentId": null,
+      "workspaceId": "ZPwbKiA2bF4Jymj8hKtvG",
+      "url": "{{ BASE_URL }}/changesets/day/20260101.jsonl",
+      "sortOrder": 2,
+      "parameters": [],
+      "pathParameters": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ TOKEN }}",
+        "disabled": false
+      },
+      "plugins": []
+    },
+    {
+      "_id": "sqTcIbmYZvSu_wFqo-ZwS",
+      "_type": "request",
+      "name": "state",
+      "method": "GET",
+      "body": { "mimeType": "No Body" },
+      "parentId": null,
+      "workspaceId": "ZPwbKiA2bF4Jymj8hKtvG",
+      "url": "{{ BASE_URL }}/meta/state",
+      "sortOrder": 0,
+      "parameters": [],
+      "pathParameters": [],
+      "plugins": []
+    },
+    {
+      "_id": "vHSWdNycTKCz0ae4Pe4SH",
+      "_type": "request",
+      "name": "health",
+      "method": "GET",
+      "body": { "mimeType": "No Body" },
+      "parentId": null,
+      "workspaceId": "ZPwbKiA2bF4Jymj8hKtvG",
+      "url": "{{ BASE_URL }}/health",
+      "sortOrder": 1,
+      "parameters": [],
+      "pathParameters": [],
+      "plugins": []
+    },
+    {
+      "_id": "zudIhExxyHjPu7bYq0Ciu",
+      "_type": "request",
+      "name": "changesets hour jsonl",
+      "method": "GET",
+      "body": { "mimeType": "No Body" },
+      "parentId": null,
+      "workspaceId": "ZPwbKiA2bF4Jymj8hKtvG",
+      "url": "{{ BASE_URL }}/changesets/day/20260101/hour/13.jsonl",
+      "sortOrder": 3,
+      "parameters": [],
+      "pathParameters": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ TOKEN }}",
+        "disabled": false
+      },
+      "plugins": []
+    }
+  ],
+  "environments": [
+    {
+      "name": "local",
+      "environment": {
+        "BASE_URL": "http://localhost:3000",
+        "TOKEN": "SET_YOUR_API_TOKEN_HERE"
+      },
+      "color": "var(--text-color)"
+    },
+    {
+      "name": "prod",
+      "color": "#cd0900",
+      "environment": {
+        "BASE_URL": "https://chch.osm.lol",
+        "TOKEN": "SET_YOUR_API_TOKEN_HERE"
+      }
+    }
+  ]
+}
