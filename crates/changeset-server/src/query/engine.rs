@@ -541,8 +541,8 @@ fn parse_partition_key(path: &Path) -> Option<(u32, u32)> {
 mod serde_duckdb {
     use super::timestamp_millis_from_value;
     use crate::models::Changeset;
-    use duckdb::{types::Value, Row};
-    use std::collections::HashMap;
+    use duckdb::Row;
+    
 
     pub fn from_row(row: &Row) -> Result<Changeset, duckdb::Error> {
         // Helper macro to reduce boilerplate for optional field extraction

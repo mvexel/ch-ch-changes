@@ -254,11 +254,10 @@ fn setup_watcher(
                 let path = entry.path();
                 if path.is_dir() {
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if name.starts_with("year=") {
-                            if watcher.watch(&path, RecursiveMode::NonRecursive).is_ok() {
+                        if name.starts_with("year=")
+                            && watcher.watch(&path, RecursiveMode::NonRecursive).is_ok() {
                                 watched += 1;
                             }
-                        }
                     }
                 }
             }
