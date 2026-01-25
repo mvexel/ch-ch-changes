@@ -12,6 +12,7 @@ mod auth;
 mod constants;
 mod format;
 mod models;
+mod openapi;
 mod query;
 mod routes;
 mod state;

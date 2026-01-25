@@ -5,6 +5,7 @@ use crate::format::{
     StreamingFormatter,
 };
 use crate::models::{ApiError, Changeset};
+use crate::models::error::ErrorResponse;
 use crate::query::engine::QueryFilters;
 use crate::state::AppState;
 use axum::{
@@ -16,18 +17,27 @@ use axum::{
 use chrono::{NaiveDate, TimeZone, Utc};
 use serde::Deserialize;
 use std::convert::Infallible;
+use utoipa::IntoParams;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct QueryParams {
+    /// Output format: json, xml, or jsonl
     pub format: Option<String>,
+    /// Filter by username
     pub user: Option<String>,
+    /// Filter by user ID
     pub uid: Option<i64>,
+    /// Filter by open status
     pub open: Option<bool>,
+    /// Maximum number of results to return
     pub limit: Option<u32>,
+    /// Number of results to skip
     pub offset: Option<u32>,
     /// Request streaming response mode (currently disabled)
     pub stream: Option<bool>,
+    /// Column to order by (id, created_at, closed_at, user, uid, num_changes, comments_count, open)
     pub order_by: Option<String>,
+    /// Sort direction: ASC or DESC
     pub order_direction: Option<String>,
 }
 
@@ -184,6 +194,24 @@ fn create_format_stream<F: StreamingFormatter + 'static>(
     }
 }
 
+/// Get changesets for a specific day
+#[utoipa::path(
+    get,
+    path = "/changesets/day/{date}",
+    params(
+        ("date" = String, Path, description = "Date in YYYYMMDD format (e.g., 20240115). Can include format extension (.json, .xml, .jsonl)"),
+        QueryParams
+    ),
+    responses(
+        (status = 200, description = "List of changesets for the specified day", content_type = "application/json"),
+        (status = 400, description = "Invalid date format or parameters", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Changesets",
+    security(
+        ("api_key" = [])
+    )
+)]
 pub async fn get_changesets_by_day(
     State(state): State<AppState>,
     Path(date_str_raw): Path<String>,

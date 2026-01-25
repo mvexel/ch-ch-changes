@@ -7,8 +7,11 @@ pub mod changesets;
 pub mod meta;
 
 use crate::auth;
+use crate::openapi::ApiDoc;
 use crate::AppState;
 use axum::{middleware, routing::get, Router};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 /// Create the main API router with all routes
 pub fn create_router(state: AppState) -> Router {
@@ -45,7 +48,12 @@ pub fn create_router(state: AppState) -> Router {
             auth::middleware::auth_middleware,
         ));
 
+    // OpenAPI and Swagger UI routes
+    let swagger_ui = SwaggerUi::new("/swagger-ui")
+        .url("/openapi.json", ApiDoc::openapi());
+
     Router::new()
+        .merge(swagger_ui)
         .merge(public_routes)
         .merge(protected_routes)
         .with_state(state)

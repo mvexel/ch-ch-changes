@@ -46,3 +46,6 @@ sha2 = "0.10"
 tokio-rusqlite = "0.5"
 url = "2.5"
 tempfile = "3.10"
+# OpenAPI support
+utoipa = { version = "5.3", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "8.0", features = ["axum"] }

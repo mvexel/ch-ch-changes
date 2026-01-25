@@ -11,6 +11,7 @@
 //! - 500 Internal Server Error if metadata unavailable
 
 use crate::models::ApiError;
+use crate::models::error::ErrorResponse;
 use crate::state::AppState;
 use crate::API_VERSION;
 use axum::{extract::State, Json};
@@ -18,8 +19,9 @@ use chrono::{DateTime, NaiveDateTime, SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
@@ -28,7 +30,7 @@ pub struct HealthResponse {
     pub partition_count: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ReplicationStateResponse {
     pub sequence: u64,
     pub last_run: String,
@@ -38,6 +40,14 @@ pub struct ReplicationStateResponse {
 /// Health check endpoint
 ///
 /// Returns basic health information about the API service.
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "API is healthy", body = HealthResponse)
+    ),
+    tag = "Meta"
+)]
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let parquet_files = list_parquet_files(state.engine.data_path());
     let partition_count = parquet_files.len() as u32;
@@ -53,6 +63,16 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 }
 
 /// Get replication state information from the local state file.
+#[utoipa::path(
+    get,
+    path = "/meta/state",
+    responses(
+        (status = 200, description = "Replication state information", body = ReplicationStateResponse),
+        (status = 404, description = "Replication state not found", body = ErrorResponse),
+        (status = 500, description = "Failed to read replication state", body = ErrorResponse)
+    ),
+    tag = "Meta"
+)]
 pub async fn get_replication_state(
     State(state): State<AppState>,
 ) -> Result<Json<ReplicationStateResponse>, ApiError> {

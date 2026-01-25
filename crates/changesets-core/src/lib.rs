@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[cfg(feature = "openapi")]
+use utoipa::ToSchema;
+
 pub mod builder;
 #[cfg(feature = "indexing")]
 pub mod indexing;
@@ -30,6 +33,7 @@ pub mod writer;
 /// - `description` - Changeset description/comment
 /// - `tags` - Additional key-value pairs (e.g., "comment", "review_requested")
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct Changeset {
     pub id: i64,
     pub replication_sequence: Option<u64>,
