@@ -29,15 +29,23 @@ struct OsmUser {
     display_name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct MeResponse {
+    /// OSM user ID
     pub osm_uid: i64,
+    /// OSM display name
     pub display_name: String,
+    /// API key prefix for identification
     pub key_prefix: String,
+    /// Timestamp when the API key was created
     pub key_created_at: String,
+    /// Daily request limit (null if unlimited)
     pub daily_limit: Option<i64>,
+    /// Monthly request limit (null if unlimited)
     pub monthly_limit: Option<i64>,
+    /// Number of requests made today
     pub daily_usage: i64,
+    /// Number of requests made this month
     pub monthly_usage: i64,
 }
 
@@ -124,6 +132,20 @@ pub async fn oauth_callback(
     Ok(([(header::CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response())
 }
 
+/// Get current user information and API usage
+#[utoipa::path(
+    get,
+    path = "/auth/me",
+    responses(
+        (status = 200, description = "Current user information and API usage", body = MeResponse),
+        (status = 401, description = "Unauthorized - invalid or missing API key", body = crate::models::error::ErrorResponse),
+        (status = 500, description = "Internal server error", body = crate::models::error::ErrorResponse)
+    ),
+    tag = "Auth",
+    security(
+        ("api_key" = [])
+    )
+)]
 pub async fn get_me(
     State(state): State<AppState>,
     axum::extract::Extension(auth_key): axum::extract::Extension<crate::auth::AuthenticatedKey>,

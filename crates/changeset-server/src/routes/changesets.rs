@@ -288,6 +288,25 @@ pub async fn get_changesets_by_day(
     }
 }
 
+/// Get changesets for a date range
+#[utoipa::path(
+    get,
+    path = "/changesets/date/from/{start}/to/{end}",
+    params(
+        ("start" = String, Path, description = "Start date in YYYYMMDD format (e.g., 20240115)"),
+        ("end" = String, Path, description = "End date in YYYYMMDD format (e.g., 20240116). Can include format extension (.json, .xml, .jsonl). Maximum 1 day range."),
+        QueryParams
+    ),
+    responses(
+        (status = 200, description = "List of changesets for the specified date range", content_type = "application/json"),
+        (status = 400, description = "Invalid date format, parameters, or range too large", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Changesets",
+    security(
+        ("api_key" = [])
+    )
+)]
 pub async fn get_changesets_by_date_range(
     State(state): State<AppState>,
     Path((start_str, end_raw)): Path<(String, String)>,
@@ -401,6 +420,25 @@ pub async fn get_changesets_by_date_range(
     }
 }
 
+/// Get changesets for a specific hour
+#[utoipa::path(
+    get,
+    path = "/changesets/day/{date}/hour/{hour}",
+    params(
+        ("date" = String, Path, description = "Date in YYYYMMDD format (e.g., 20240115)"),
+        ("hour" = String, Path, description = "Hour in 24-hour format (0-23). Can include format extension (.json, .xml, .jsonl)"),
+        QueryParams
+    ),
+    responses(
+        (status = 200, description = "List of changesets for the specified hour", content_type = "application/json"),
+        (status = 400, description = "Invalid date, hour, or parameters", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Changesets",
+    security(
+        ("api_key" = [])
+    )
+)]
 pub async fn get_changesets_by_hour(
     State(state): State<AppState>,
     Path((date_str, hour_str_raw)): Path<(String, String)>,
@@ -497,6 +535,26 @@ pub async fn get_changesets_by_hour(
     }
 }
 
+/// Get changesets for a specific minute
+#[utoipa::path(
+    get,
+    path = "/changesets/day/{date}/hour/{hour}/minute/{minute}",
+    params(
+        ("date" = String, Path, description = "Date in YYYYMMDD format (e.g., 20240115)"),
+        ("hour" = String, Path, description = "Hour in 24-hour format (0-23)"),
+        ("minute" = String, Path, description = "Minute (0-59). Can include format extension (.json, .xml, .jsonl)"),
+        QueryParams
+    ),
+    responses(
+        (status = 200, description = "List of changesets for the specified minute", content_type = "application/json"),
+        (status = 400, description = "Invalid date, hour, minute, or parameters", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Changesets",
+    security(
+        ("api_key" = [])
+    )
+)]
 pub async fn get_changesets_by_minute(
     State(state): State<AppState>,
     Path((date_str, hour_str, minute_str_raw)): Path<(String, String, String)>,
@@ -604,6 +662,25 @@ pub async fn get_changesets_by_minute(
     }
 }
 
+/// Get changesets by ID range
+#[utoipa::path(
+    get,
+    path = "/changesets/id/from/{start}/to/{end}",
+    params(
+        ("start" = String, Path, description = "Start changeset ID (positive integer)"),
+        ("end" = String, Path, description = "End changeset ID (positive integer). Can include format extension (.json, .xml, .jsonl). Maximum range of 1,000,000 IDs."),
+        QueryParams
+    ),
+    responses(
+        (status = 200, description = "List of changesets in the specified ID range", content_type = "application/json"),
+        (status = 400, description = "Invalid ID, parameters, or range too large", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "Changesets",
+    security(
+        ("api_key" = [])
+    )
+)]
 pub async fn get_changesets_by_id_range(
     State(state): State<AppState>,
     Path((start_raw, end_raw)): Path<(String, String)>,

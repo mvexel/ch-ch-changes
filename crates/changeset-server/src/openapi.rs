@@ -3,6 +3,7 @@
 //! Builds the OpenAPI/Swagger specification for the API.
 
 use crate::routes::{changesets, meta};
+use crate::auth::routes::MeResponse;
 use crate::models::Changeset;
 use crate::models::error::{ErrorResponse, ErrorDetail};
 use crate::routes::meta::{HealthResponse, ReplicationStateResponse};
@@ -19,19 +20,28 @@ use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 
         // Changeset endpoints
         changesets::get_changesets_by_day,
+        changesets::get_changesets_by_hour,
+        changesets::get_changesets_by_minute,
+        changesets::get_changesets_by_date_range,
+        changesets::get_changesets_by_id_range,
+
+        // Auth endpoints
+        crate::auth::routes::get_me,
     ),
     components(
         schemas(
             Changeset,
             HealthResponse,
             ReplicationStateResponse,
+            MeResponse,
             ErrorResponse,
             ErrorDetail,
         )
     ),
     tags(
         (name = "Meta", description = "Health and metadata endpoints"),
-        (name = "Changesets", description = "Changeset query endpoints")
+        (name = "Changesets", description = "Changeset query endpoints"),
+        (name = "Auth", description = "Authentication and user management endpoints")
     ),
     info(
         title = "OSM Changeset Historic API",
