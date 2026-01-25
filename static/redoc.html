@@ -3,9 +3,12 @@
   <head>
     <meta charset="utf-8"/>
     <title>API Docs</title>
-    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
   </head>
   <body>
-    <redoc spec-url="https://chch.osm.lol/openapi.json"></redoc>
+    <div id="redoc"></div>
+    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+    <script>
+      Redoc.init('/openapi.json', {}, document.getElementById('redoc'));
+    </script>
   </body>
 </html>
