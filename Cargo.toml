@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.1"
+version = "0.1.0"
 edition = "2021"
 
 [workspace.dependencies]
@@ -23,12 +23,12 @@ parquet = "54.3"
 duckdb = { version = "1.1", features = ["bundled"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 quick-xml = "0.36"
-bzip2 = "0.4"
+bzip2 = "0.6"
 flate2 = "1.0"
 # Reqwest with only rustls (no native-tls) to reduce build size
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-native-roots", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "form"] }
 r2d2 = "0.8"
-axum = "0.7"
+axum = "0.8"
 # Tokio with only needed features (not "full") to reduce build size
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros"] }
 tower = "0.4"
@@ -43,9 +43,9 @@ futures-core = "0.3"
 hex = "0.4"
 rand = "0.8"
 sha2 = "0.10"
-tokio-rusqlite = "0.5"
+tokio-rusqlite = "0.7"
 url = "2.5"
 tempfile = "3.10"
 # OpenAPI support
 utoipa = { version = "5.3", features = ["axum_extras", "chrono"] }
-utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
+utoipa-swagger-ui = { version = "9.0", features = ["axum"] }

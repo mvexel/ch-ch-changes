@@ -3,7 +3,7 @@ use chrono::{SecondsFormat, Utc};
 use std::path::Path;
 use std::sync::Arc;
 use tokio_rusqlite::Connection;
-use tokio_rusqlite::{params, OptionalExtension};
+use tokio_rusqlite::{params, rusqlite, OptionalExtension};
 
 #[derive(Clone)]
 pub struct AuthDb {
@@ -110,7 +110,7 @@ impl AuthDb {
                 );
                 ",
             )?;
-            Ok(())
+            Ok::<(), rusqlite::Error>(())
         })
         .await
         .context("Failed to initialize auth db schema")?;
@@ -127,7 +127,7 @@ impl AuthDb {
         let display_name = display_name.to_string();
         let conn = self.conn.clone();
         conn.call(move |conn| {
-            conn.execute(
+            let _ = conn.execute(
                 "
                 INSERT INTO users (osm_uid, display_name, created_at, daily_limit, monthly_limit)
                 VALUES (?1, ?2, ?3, ?4, ?5)
@@ -155,7 +155,7 @@ impl AuthDb {
                     monthly_limit: row.get(4)?,
                 })
             })?;
-            Ok(record)
+            Ok::<UserRecord, rusqlite::Error>(record)
         })
         .await
         .context("Failed to upsert user")
@@ -169,7 +169,7 @@ impl AuthDb {
                 "UPDATE api_keys SET revoked_at = ?1 WHERE user_id = ?2 AND revoked_at IS NULL",
                 params![revoked_at, user_id],
             )?;
-            Ok(())
+            Ok::<(), rusqlite::Error>(())
         })
         .await
         .context("Failed to revoke user keys")?;
@@ -192,7 +192,7 @@ impl AuthDb {
                  VALUES (?1, ?2, ?3, ?4)",
                 params![user_id, key_prefix, key_hash, created_at],
             )?;
-            Ok(conn.last_insert_rowid())
+            Ok::<i64, rusqlite::Error>(conn.last_insert_rowid())
         })
         .await
         .context("Failed to insert API key")
@@ -232,7 +232,7 @@ impl AuthDb {
                     })
                 })
                 .optional()?;
-            Ok(record)
+            Ok::<Option<AuthenticatedKey>, rusqlite::Error>(record)
         })
         .await
         .context("Failed to lookup API key")
@@ -270,7 +270,7 @@ impl AuthDb {
                 params![user_id, month],
                 |row| row.get(0),
             )?;
-            Ok(UsageSnapshot {
+            Ok::<UsageSnapshot, rusqlite::Error>(UsageSnapshot {
                 daily_count: daily,
                 monthly_count: monthly,
             })
@@ -307,7 +307,7 @@ impl AuthDb {
                 params![now, api_key_id],
             )?;
             tx.commit()?;
-            Ok(())
+            Ok::<(), rusqlite::Error>(())
         })
         .await
         .context("Failed to increment usage")?;
