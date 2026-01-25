@@ -16,6 +16,7 @@ pub struct QueryBuilder {
     limit: Option<u32>,
     offset: Option<u32>,
     deduplicate: bool,
+    order_by: Option<String>,
 }
 
 impl QueryBuilder {
@@ -27,6 +28,7 @@ impl QueryBuilder {
             limit: None,
             offset: None,
             deduplicate: false,
+            order_by: None
         }
     }
 
@@ -107,6 +109,12 @@ impl QueryBuilder {
         self
     }
 
+    /// Add sort by closed at query
+    pub fn order_by(mut self, column: &str, direction: &str) -> Self {
+        self.order_by = Some(format!("{} {}", column, direction));
+        self
+    }
+
     /// Build the final SQL query string
     pub fn build(self) -> String {
         if self.parquet_paths.is_empty() {
@@ -125,6 +133,10 @@ impl QueryBuilder {
         if self.deduplicate {
             // Latest wins strategy: highest replication_sequence = freshest data
             query.push_str(" QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY replication_sequence DESC NULLS LAST) = 1");
+        }
+
+        if let Some(order_by) = self.order_by {
+            write!(&mut query, " ORDER BY {}", order_by).ok();
         }
 
         if let Some(limit) = self.limit {
@@ -202,5 +214,42 @@ mod tests {
             query,
             "SELECT * REPLACE (to_json(tags) AS tags) FROM read_parquet('/data/o''reilly.parquet', hive_partitioning=true) WHERE user = 'o''reilly'"
         );
+    }
+
+    #[test]
+    fn test_order_by() {
+        let query = QueryBuilder::new()
+            .from_parquet("/data/year=2024/month=05.parquet")
+            .order_by("closed_at", "ASC")
+            .build();
+        assert_eq!(
+            query,
+            "SELECT * REPLACE (to_json(tags) AS tags) FROM read_parquet('/data/year=2024/month=05.parquet', hive_partitioning=true) ORDER BY closed_at ASC"
+        );
+    }
+
+    #[test]
+    fn test_id_range_filter() {
+        let query = QueryBuilder::new()
+            .from_parquet("/data/test.parquet")
+            .filter_id_range(100, 500)
+            .build();
+        assert_eq!(
+            query,
+            "SELECT * REPLACE (to_json(tags) AS tags) FROM read_parquet('/data/test.parquet', hive_partitioning=true) WHERE id >= 100 AND id <= 500"
+        );
+    }
+
+    #[test]
+    fn test_id_range_with_other_filters() {
+        let query = QueryBuilder::new()
+            .from_parquet("/data/test.parquet")
+            .filter_id_range(1, 10)
+            .filter_open(true)
+            .limit(5)
+            .build();
+        assert!(query.contains("id >= 1 AND id <= 10"));
+        assert!(query.contains("open = true"));
+        assert!(query.contains("LIMIT 5"));
     }
 }

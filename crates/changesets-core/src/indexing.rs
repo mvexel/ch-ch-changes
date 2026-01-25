@@ -292,6 +292,7 @@ pub fn write_metadata(
     output_dir: &PathBuf,
     total_count: usize,
     partition_counts: &HashMap<crate::models::PartitionKey, usize>,
+    partition_stats: &HashMap<crate::models::PartitionKey, crate::models::PartitionStats>,
 ) -> Result<()> {
     use std::io::Write;
 
@@ -302,11 +303,19 @@ pub fn write_metadata(
     let mut partitions: Vec<_> = partition_counts
         .iter()
         .map(|(k, v)| {
+            // Get ID range from stats if available
+            let (min_id, max_id) = partition_stats
+                .get(k)
+                .map(|stats| (stats.min_id, stats.max_id))
+                .unwrap_or((i64::MAX, i64::MIN));
+
             serde_json::json!({
                 "year": k.year,
                 "month": k.month,
                 "path": k.dir_path(),
-                "count": v
+                "count": v,
+                "min_id": min_id,
+                "max_id": max_id
             })
         })
         .collect();

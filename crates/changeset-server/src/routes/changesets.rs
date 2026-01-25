@@ -27,6 +27,8 @@ pub struct QueryParams {
     pub offset: Option<u32>,
     /// Request streaming response mode (currently disabled)
     pub stream: Option<bool>,
+    pub order_by: Option<String>,
+    pub order_direction: Option<String>,
 }
 
 // Streaming is disabled due to severe performance/oom issues under load.
@@ -50,6 +52,9 @@ impl QueryParams {
         }
         if let Some(offset) = self.offset {
             filters = filters.with_offset(offset);
+        }
+        if let Some(order_by) = &self.order_by {
+            filters = filters.with_order_by(order_by.clone(), self.order_direction.clone());
         }
         filters
     }
@@ -571,6 +576,98 @@ pub async fn get_changesets_by_minute(
     }
 }
 
+pub async fn get_changesets_by_id_range(
+    State(state): State<AppState>,
+    Path((start_raw, end_raw)): Path<(String, String)>,
+    Query(mut params): Query<QueryParams>,
+) -> Response {
+    // Extract format extension from end parameter
+    let (end_str, ext_format) = extract_extension(&end_raw);
+    if params.format.is_none() {
+        params.format = ext_format;
+    }
+
+    // Validate start_id
+    let start_id = match start_raw.parse::<i64>() {
+        Ok(id) if id > 0 => id,
+        _ => {
+            return ApiError::bad_request_with_details(
+                "Invalid start ID",
+                format!("'{}' is not a valid changeset ID. Must be a positive integer", start_raw)
+            ).into_response()
+        }
+    };
+
+    // Validate end_id
+    let end_id = match end_str.parse::<i64>() {
+        Ok(id) if id > 0 => id,
+        _ => {
+            return ApiError::bad_request_with_details(
+                "Invalid end ID",
+                format!("'{}' is not a valid changeset ID. Must be a positive integer", end_str)
+            ).into_response()
+        }
+    };
+
+    // Validate range
+    if start_id > end_id {
+        return ApiError::bad_request_with_details(
+            "Invalid ID range",
+            format!("start_id ({}) must be less than or equal to end_id ({})", start_id, end_id)
+        ).into_response()
+    }
+
+    // Safety limit: Maximum 1,000,000 ID range
+    const MAX_ID_RANGE: i64 = 1_000_000;
+    let range_size = end_id - start_id + 1;
+    if range_size > MAX_ID_RANGE {
+        return ApiError::bad_request_with_details(
+            "ID range too large",
+            format!(
+                "Requested range of {} IDs, but maximum allowed is {}. Please use a smaller range or pagination.",
+                range_size, MAX_ID_RANGE
+            ),
+        ).into_response();
+    }
+
+    // Non-streaming mode - offload to blocking thread pool
+    let engine = state.engine.clone();
+    let filters = params.to_filters();
+    let format_opt = params.format.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        engine
+            .get_changesets_by_id_range(start_id, end_id, &filters)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Task join error: {}", e);
+        Err("Task panicked".to_string())
+    });
+
+    match result {
+        Ok(changesets) => {
+            // Safety limit: Check result set size
+            const MAX_RESULT_SIZE: usize = 100_000;
+            if changesets.len() > MAX_RESULT_SIZE {
+                return ApiError::bad_request_with_details(
+                    "Result set too large",
+                    format!(
+                        "Query returned {} changesets, but maximum allowed is {}. Please use a smaller ID range or pagination (limit/offset).",
+                        changesets.len(), MAX_RESULT_SIZE
+                    ),
+                ).into_response();
+            }
+            format_response(&changesets, format_opt.as_deref(), false)
+        }
+        Err(e) => {
+            tracing::error!("Query error: {}", e);
+            ApiError::internal_error("Database query failed").into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -668,6 +765,8 @@ mod tests {
                 limit: None,
                 offset: None,
                 stream: None,
+                order_by: None,
+                order_direction: None,
             }),
         )
         .await;
@@ -702,6 +801,8 @@ mod tests {
                 limit: None,
                 offset: None,
                 stream: None,
+                order_by: None,
+                order_direction: None,
             }),
         )
         .await;
@@ -723,6 +824,8 @@ mod tests {
                 limit: None,
                 offset: None,
                 stream: None,
+                order_by: None,
+                order_direction: None,
             }),
         )
         .await;
@@ -751,6 +854,8 @@ mod tests {
                 limit: None,
                 offset: None,
                 stream: None,
+                order_by: None,
+                order_direction: None,
             }),
         )
         .await;
@@ -772,6 +877,8 @@ mod tests {
                 limit: None,
                 offset: None,
                 stream: None,
+                order_by: None,
+                order_direction: None,
             }),
         )
         .await;
@@ -800,6 +907,8 @@ mod tests {
                 limit: None,
                 offset: None,
                 stream: None,
+                order_by: None,
+                order_direction: None,
             }),
         )
         .await;
@@ -821,6 +930,8 @@ mod tests {
                 limit: None,
                 offset: None,
                 stream: None,
+                order_by: None,
+                order_direction: None,
             }),
         )
         .await;
@@ -852,6 +963,8 @@ mod tests {
                 limit: None,
                 offset: None,
                 stream: None,
+                order_by: None,
+                order_direction: None,
             }),
         )
         .await;
@@ -862,5 +975,138 @@ mod tests {
             .get(header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok());
         assert_eq!(content_type, Some("application/x-ndjson"));
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_id_range_json() {
+        let (_dir, state) = setup_state().await;
+        let response = get_changesets_by_id_range(
+            State(state),
+            Path(("1".to_string(), "2".to_string())),
+            Query(QueryParams {
+                format: Some("json".to_string()),
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+                stream: None,
+                order_by: None,
+                order_direction: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let value: Value = serde_json::from_slice(&body).expect("json");
+        let changesets = value["changesets"].as_array().expect("changesets");
+        assert_eq!(changesets.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_id_range_invalid_start() {
+        let (_dir, state) = setup_state().await;
+        let response = get_changesets_by_id_range(
+            State(state),
+            Path(("invalid".to_string(), "100".to_string())),
+            Query(QueryParams {
+                format: None,
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+                stream: None,
+                order_by: None,
+                order_direction: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_id_range_inverted() {
+        let (_dir, state) = setup_state().await;
+        let response = get_changesets_by_id_range(
+            State(state),
+            Path(("100".to_string(), "50".to_string())),
+            Query(QueryParams {
+                format: None,
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+                stream: None,
+                order_by: None,
+                order_direction: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_id_range_json_suffix() {
+        let (_dir, state) = setup_state().await;
+        let response = get_changesets_by_id_range(
+            State(state),
+            Path(("1".to_string(), "2.json".to_string())),
+            Query(QueryParams {
+                format: None,
+                user: None,
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+                stream: None,
+                order_by: None,
+                order_direction: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok());
+        assert_eq!(content_type, Some("application/json"));
+    }
+
+    #[tokio::test]
+    async fn test_get_changesets_by_id_range_with_filter() {
+        let (_dir, state) = setup_state().await;
+        let response = get_changesets_by_id_range(
+            State(state),
+            Path(("1".to_string(), "2".to_string())),
+            Query(QueryParams {
+                format: Some("json".to_string()),
+                user: Some("alice".to_string()),
+                uid: None,
+                open: None,
+                limit: None,
+                offset: None,
+                stream: None,
+                order_by: None,
+                order_direction: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let value: Value = serde_json::from_slice(&body).expect("json");
+        let changesets = value["changesets"].as_array().expect("changesets");
+        assert_eq!(changesets.len(), 1);
+        assert_eq!(changesets[0]["user"], "alice");
     }
 }

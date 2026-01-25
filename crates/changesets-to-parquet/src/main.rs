@@ -126,7 +126,7 @@ fn main() -> Result<()> {
         println!("\nFinalizing partitions...");
         let PartitionSummary {
             counts: partition_counts,
-            stats: _,
+            stats: partition_stats,
         } = summary;
 
         if let Some(collector) = index_collector {
@@ -141,7 +141,7 @@ fn main() -> Result<()> {
         );
 
         // Write metadata file
-        write_metadata(&output_dir, total_count, &partition_counts)?;
+        write_metadata(&output_dir, total_count, &partition_counts, &partition_stats)?;
     } else {
         // Single file output mode (original behavior)
         let output = args.output.as_ref().unwrap();

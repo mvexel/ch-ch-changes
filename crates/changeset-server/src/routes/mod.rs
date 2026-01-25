@@ -35,6 +35,10 @@ pub fn create_router(state: AppState) -> Router {
             "/changesets/date/from/:start/to/:end",
             get(changesets::get_changesets_by_date_range),
         )
+        .route(
+            "/changesets/id/from/:start/to/:end",
+            get(changesets::get_changesets_by_id_range),
+        )
         .route("/auth/me", get(auth::routes::get_me))
         .layer(middleware::from_fn_with_state(
             state.clone(),

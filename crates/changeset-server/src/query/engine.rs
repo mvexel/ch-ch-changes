@@ -109,11 +109,46 @@ impl QueryEngine {
         globs
     }
 
+    /// Validate the order_by direction parameter to avoid SQL injection and invalid queries
+    fn validate_and_build_order(
+        order_by: Option<&str>,
+        order_direction: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let Some(column) = order_by else {
+            return Ok(None);
+        };
+
+        let allowed_columns = [
+            "id",
+            "created_at",
+            "closed_at",
+            "user",
+            "uid",
+            "num_changes",
+            "comments_count",
+            "open"
+        ];
+
+        if !allowed_columns.contains(&column) {
+            return Err(format!("Invalid order_by column: {}", column));
+        }
+
+        // Default to ASC if direction not specified
+        let direction = match order_direction {
+            Some("DESC") | Some("desc") => "DESC",
+            Some("ASC") | Some("asc") | Some("") | None => "ASC",
+            Some(invalid) => return Err(format!("Invalid order_direction: {}", invalid)),
+        };
+
+        Ok(Some(format!("{} {}", column, direction)))
+    }
+
     pub fn data_path(&self) -> &std::path::Path {
         &self.data_path
     }
 
     /// Query changesets by date range
+    /// Currently not supported for performance reasons.
     pub fn get_changesets_by_date_range(
         &self,
         start_date: &str,
@@ -139,7 +174,8 @@ impl QueryEngine {
         let mut builder = QueryBuilder::new()
             .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
             .filter_date_range(&start_str, &end_str)
-            .deduplicate();
+            .deduplicate()
+            .order_by("closed_at", "ASC");
         builder = self.apply_filters_to_builder(builder, filters, true);
         let query = builder.build();
         self.execute_query_sql(&query)
@@ -176,7 +212,8 @@ impl QueryEngine {
         let mut builder = QueryBuilder::new()
             .from_parquets(partitions.iter().map(|p| p.as_str()).collect())
             .filter_date_range(&start_str, &end_str)
-            .deduplicate();
+            .deduplicate()
+            .order_by("closed_at", "ASC");
         builder = self.apply_filters_to_builder(builder, filters, true);
         let query = builder.build();
         self.stream_query_sql(&query, tx)
@@ -199,6 +236,35 @@ impl QueryEngine {
             .filter_user(username)
             .deduplicate();
         builder = self.apply_filters_to_builder(builder, filters, false);
+        let query = builder.build();
+        self.execute_query_sql(&query)
+    }
+
+    /// Query changesets by ID range
+    pub fn get_changesets_by_id_range(
+        &self,
+        start_id: i64,
+        end_id: i64,
+        filters: &QueryFilters,
+    ) -> Result<Vec<Changeset>, Box<dyn std::error::Error>> {
+        if start_id > end_id {
+            return Ok(Vec::new());
+        }
+
+        // Use full table scan (all partitions)
+        // Future optimization: read metadata.json and filter partitions by ID range
+        let mut builder = QueryBuilder::new()
+            .from_parquets(
+                self.get_glob_patterns()
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect(),
+            )
+            .filter_id_range(start_id, end_id)
+            .deduplicate()
+            .order_by("id", "ASC");
+
+        builder = self.apply_filters_to_builder(builder, filters, true);
         let query = builder.build();
         self.execute_query_sql(&query)
     }
@@ -309,7 +375,7 @@ impl QueryEngine {
         };
 
         let mut stmt = conn.prepare(&format!(
-            "SELECT MIN(created_at) AS min_created_at, MAX(created_at) AS max_created_at 
+            "SELECT MIN(created_at) AS min_created_at, MAX(created_at) AS max_created_at
              FROM read_parquet({}, hive_partitioning=true)",
             source
         ))?;
@@ -381,6 +447,11 @@ impl QueryEngine {
             builder = builder.offset(offset);
         }
 
+        if let Some(order_by) = &filters.order_by {
+            let direction = filters.order_direction.as_deref().unwrap_or("ASC");
+            builder = builder.order_by(order_by, direction);
+        }
+
         builder
     }
 
@@ -431,6 +502,8 @@ pub struct QueryFilters {
     pub open: Option<bool>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+    pub order_by: Option<String>,
+    pub order_direction: Option<String>,
 }
 
 impl QueryFilters {
@@ -460,6 +533,12 @@ impl QueryFilters {
 
     pub fn with_offset(mut self, offset: u32) -> Self {
         self.offset = Some(offset);
+        self
+    }
+
+    pub fn with_order_by(mut self, order_by: String, order_direction: Option<String>) -> Self {
+        self.order_by = Some(order_by);
+        self.order_direction = order_direction;
         self
     }
 }
@@ -542,7 +621,7 @@ mod serde_duckdb {
     use super::timestamp_millis_from_value;
     use crate::models::Changeset;
     use duckdb::Row;
-    
+
 
     pub fn from_row(row: &Row) -> Result<Changeset, duckdb::Error> {
         // Helper macro to reduce boilerplate for optional field extraction
@@ -689,5 +768,46 @@ mod tests {
 
         assert_eq!(start, Some(expected_start));
         assert_eq!(end, Some(expected_end));
+    }
+
+    #[test]
+    fn test_id_range_query() {
+        let dir = setup_parquet_dir();
+        let engine = QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
+
+        let results = engine
+            .get_changesets_by_id_range(1, 2, &QueryFilters::new())
+            .expect("query");
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|cs| cs.id >= 1 && cs.id <= 2));
+        let ids: Vec<i64> = results.iter().map(|cs| cs.id).collect();
+        assert!(ids.contains(&1));
+        assert!(ids.contains(&2));
+    }
+
+    #[test]
+    fn test_id_range_with_filters() {
+        let dir = setup_parquet_dir();
+        let engine = QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
+
+        let filters = QueryFilters::new().with_username("alice".to_string());
+        let results = engine
+            .get_changesets_by_id_range(1, 10, &filters)
+            .expect("query");
+
+        assert!(results.iter().all(|cs| cs.user.as_ref().unwrap() == "alice"));
+    }
+
+    #[test]
+    fn test_id_range_inverted_returns_empty() {
+        let dir = setup_parquet_dir();
+        let engine = QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
+
+        let results = engine
+            .get_changesets_by_id_range(10, 1, &QueryFilters::new())
+            .expect("query");
+
+        assert_eq!(results.len(), 0);
     }
 }
