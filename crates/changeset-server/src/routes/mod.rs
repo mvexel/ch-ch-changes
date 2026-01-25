@@ -23,23 +23,23 @@ pub fn create_router(state: AppState) -> Router {
 
     let protected_routes = Router::new()
         .route(
-            "/changesets/day/:date",
+            "/changesets/day/{date}",
             get(changesets::get_changesets_by_day),
         )
         .route(
-            "/changesets/day/:date/hour/:hour",
+            "/changesets/day/{date}/hour/{hour}",
             get(changesets::get_changesets_by_hour),
         )
         .route(
-            "/changesets/day/:date/hour/:hour/minute/:minute",
+            "/changesets/day/{date}/hour/{hour}/minute/{minute}",
             get(changesets::get_changesets_by_minute),
         )
         .route(
-            "/changesets/date/from/:start/to/:end",
+            "/changesets/date/from/{start}/to/{end}",
             get(changesets::get_changesets_by_date_range),
         )
         .route(
-            "/changesets/id/from/:start/to/:end",
+            "/changesets/id/from/{start}/to/{end}",
             get(changesets::get_changesets_by_id_range),
         )
         .route("/auth/me", get(auth::routes::get_me))
