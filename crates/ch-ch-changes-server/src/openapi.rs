@@ -48,11 +48,11 @@ use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
         version = env!("CARGO_PKG_VERSION"),
         description = "API for querying OpenStreetMap changeset metadata by date, time, or ID range.",
         license(
-            name = "MIT",
+            name = "ISC",
         ),
         contact(
             name = "API Support",
-            url = "https://codeberg.org/mvexel/osm-changeset-api"
+            url = "https://codeberg.org/mvexel/ch-ch-changes"
         )
     ),
     servers(

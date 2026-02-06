@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Configuration
 HEALTH_URL="http://localhost:3000/health"
-SERVICE_NAME="changeset-server"
+SERVICE_NAME="chch-server"
 ALERT_EMAIL="${ALERT_EMAIL:-}"  # Set via environment or cron
 
 # Exit codes

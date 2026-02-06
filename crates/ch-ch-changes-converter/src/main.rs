@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use bzip2::read::MultiBzDecoder;
-use changesets_core::{
+use ch_ch_changes_core::{
     indexing::{write_metadata, IndexCollector},
     models::PartitionSummary,
     parsing::parse_xml_to_channel,

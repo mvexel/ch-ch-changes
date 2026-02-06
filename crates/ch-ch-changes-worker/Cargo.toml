@@ -1,14 +1,14 @@
 [package]
-name = "changeset-replication-worker"
+name = "ch-ch-changes-worker"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "changeset-replication-worker"
+name = "chch-worker"
 path = "src/main.rs"
 
 [dependencies]
-changesets-core = { path = "../changesets-core" }
+ch-ch-changes-core = { path = "../ch-ch-changes-core" }
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true

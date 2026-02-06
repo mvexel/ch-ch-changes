@@ -13,7 +13,7 @@ sudo ./setup.sh
 
 This script will:
 - Create the `changeset` system user
-- Set up directory structure in `/opt/changeset-server`
+- Set up directory structure in `/opt/chch`
 - Create data directory in `/data/parquet`
 - Install the systemd service
 - Build and deploy the initial version
@@ -36,7 +36,7 @@ This script will:
 5. Restart the service
 6. Run health checks
 
-Each deployment is kept in `/opt/changeset-server/releases/` for easy rollback.
+Each deployment is kept in `/opt/chch/releases/` for easy rollback.
 
 ### `rollback.sh`
 **Rollback to a previous version** - Use when a deployment goes wrong.
@@ -111,7 +111,7 @@ This script:
 **Schedule with cron:**
 ```bash
 # Weekly update on Sundays at 3 AM
-0 3 * * 0 /path/to/changesets-to-parquet/scripts/update-data.sh >> /var/log/changeset-update.log 2>&1
+0 3 * * 0 /path/to/chch-convert/scripts/update-data.sh >> /var/log/changeset-update.log 2>&1
 ```
 
 **Environment variables:**
@@ -123,14 +123,14 @@ This script:
 After setup, the deployment directory structure is:
 
 ```
-/opt/changeset-server/
+/opt/chch/
 ├── bin/
-│   └── changeset-server -> ../releases/current/changeset-server
+│   └── chch-server -> ../releases/current/chch-server
 ├── releases/
 │   ├── 20250114_143022/
-│   │   └── changeset-server
+│   │   └── chch-server
 │   ├── 20250114_150301/
-│   │   └── changeset-server
+│   │   └── chch-server
 │   └── current -> 20250114_150301
 └── shared/
 ```
@@ -145,21 +145,21 @@ This structure allows for:
 ### First time setup
 ```bash
 # On the VPS
-git clone https://codeberg.org/mvexel/changesets-to-parquet.git
-cd changesets-to-parquet
+git clone https://codeberg.org/mvexel/chch-convert.git
+cd chch-convert
 sudo ./scripts/setup.sh
 
 # Copy parquet data
 scp changesets_*.parquet vps:/data/parquet/
 
 # Restart to pick up data
-sudo systemctl restart changeset-server
+sudo systemctl restart chch-server
 ```
 
 ### Deploying an update
 ```bash
 # On the VPS
-cd changesets-to-parquet
+cd chch-convert
 git pull
 ./scripts/deploy.sh
 ```
@@ -167,7 +167,7 @@ git pull
 ### Rolling back a bad deployment
 ```bash
 # List available versions
-ls /opt/changeset-server/releases/
+ls /opt/chch/releases/
 
 # Rollback
 ./scripts/rollback.sh 20250114_143022
@@ -179,10 +179,10 @@ ls /opt/changeset-server/releases/
 ./scripts/healthcheck.sh
 
 # Check service status
-systemctl status changeset-server
+systemctl status chch-server
 
 # View logs
-journalctl -u changeset-server -f
+journalctl -u chch-server -f
 ```
 
 ### Updating parquet data
@@ -192,7 +192,7 @@ sudo ./scripts/update-data.sh
 
 # Or schedule weekly updates with cron
 sudo crontab -e
-# Add: 0 3 * * 0 /root/changesets-to-parquet/scripts/update-data.sh >> /var/log/changeset-update.log 2>&1
+# Add: 0 3 * * 0 /root/chch-convert/scripts/update-data.sh >> /var/log/changeset-update.log 2>&1
 ```
 
 ## Environment Variables
@@ -200,9 +200,9 @@ sudo crontab -e
 Scripts respect these environment variables:
 
 - `ALERT_EMAIL` - Email address for health check alerts (healthcheck.sh)
-- `DATA_PATH` - Path to parquet data (default: `/opt/changeset-data/changesets`) - set in systemd service file
+- `DATA_PATH` - Path to parquet data (default: `/opt/chch/data/changesets`) - set in systemd service file
 
 ## See Also
 
 - [SERVING.md](../docs/SERVING.md) - Full deployment guide
-- [systemd/changeset-server.service](../systemd/changeset-server.service) - systemd service configuration
+- [systemd/chch-server.service](../systemd/chch-server.service) - systemd service configuration

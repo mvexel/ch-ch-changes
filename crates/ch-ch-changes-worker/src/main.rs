@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use changesets_core::{
+use ch_ch_changes_core::{
     parsing::parse_xml_to_channel, schema::create_schema,
     writer::consume_and_write_partitioned_parallel, Changeset,
 };

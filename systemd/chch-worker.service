@@ -1,20 +1,20 @@
 [Unit]
-Description=OSM Changeset Replication Worker
-Documentation=https://codeberg.org/mvexel/changesets-to-parquet
+Description=ch-ch-changes OSM Changeset Replication Worker
+Documentation=https://codeberg.org/mvexel/ch-ch-changes
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=changeset
-Group=changeset
-WorkingDirectory=/opt/changeset-server
+User=chch
+Group=chch
+WorkingDirectory=/opt/chch
 
 # Environment variables
-Environment="DATA_PATH=/opt/changeset-data/changesets"
+Environment="DATA_PATH=/opt/chch/data/changesets"
 Environment="POLL_INTERVAL_SECONDS=60"
 Environment="CHANGESET_REPLICATION_URL=https://planet.openstreetmap.org/replication/changesets/"
-Environment="HOME=/var/lib/changeset-replication-worker"
+Environment="HOME=/var/lib/chch"
 
 # Compaction settings (optional - disabled by default)
 # Enable to automatically compact old delta files into single files per month
@@ -23,7 +23,7 @@ Environment="ENABLE_COMPACTION=true"
 Environment="COMPACTION_AGE_HOURS=24"
 
 # Binary location
-ExecStart=/opt/changeset-server/bin/changeset-replication-worker
+ExecStart=/opt/chch/bin/chch-worker
 
 # Restart policy
 Restart=always
@@ -34,12 +34,12 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/changeset-data /var/lib/changeset-replication-worker
+ReadWritePaths=/opt/chch/data /var/lib/chch
 
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=changeset-replication-worker
+SyslogIdentifier=chch-worker
 
 [Install]
 WantedBy=multi-user.target

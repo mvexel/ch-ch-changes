@@ -36,7 +36,7 @@ This framework tests three critical performance aspects:
 
 - **Running API server** - The changeset API must be running
   ```bash
-  cd /path/to/changesets-to-parquet
+  cd /path/to/ch-ch-changes
   cargo run --release --bin changeset-server
   ```
 

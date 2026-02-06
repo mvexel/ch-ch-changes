@@ -58,7 +58,7 @@ if ! curl -s -f "${BASE_URL}/health" > /dev/null 2>&1; then
     echo "Please start the API server before running load tests."
     echo ""
     echo "To start the server:"
-    echo "  cargo run --release --bin changeset-server"
+    echo "  cargo run --release --bin chch-server"
     exit 1
 fi
 echo -e "${GREEN}✓ API server is running${NC}"

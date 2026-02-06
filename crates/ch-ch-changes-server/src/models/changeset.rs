@@ -2,4 +2,4 @@
 //!
 //! Re-exports the canonical Changeset type from the main library.
 
-pub use changesets_core::Changeset;
+pub use ch_ch_changes_core::Changeset;

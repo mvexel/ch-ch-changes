@@ -37,7 +37,7 @@ impl AuthState {
     pub async fn new(config: AuthConfig) -> Result<Self> {
         let db = AuthDb::new(&config.db_path).await?;
         let http_client = reqwest::Client::builder()
-            .user_agent(format!("changeset-server/{}", API_VERSION))
+            .user_agent(format!("ch-ch-changes/{}", API_VERSION))
             .build()
             .context("Failed to create OAuth HTTP client")?;
         Ok(Self {

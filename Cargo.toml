@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/changesets-core",
-    "crates/changesets-to-parquet",
-    "crates/changeset-replication-worker",
-    "crates/changeset-server",
+    "crates/ch-ch-changes-core",
+    "crates/ch-ch-changes-converter",
+    "crates/ch-ch-changes-worker",
+    "crates/ch-ch-changes-server",
 ]
 
 [workspace.package]

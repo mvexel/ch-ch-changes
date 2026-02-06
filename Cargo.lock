@@ -772,28 +772,41 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
-name = "changeset-replication-worker"
+name = "ch-ch-changes-converter"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "changesets-core",
- "chrono",
+ "arrow 54.3.1",
+ "bzip2",
+ "ch-ch-changes-core",
  "clap",
- "duckdb",
- "flate2",
- "reqwest 0.13.1",
- "tempfile",
+ "parquet",
 ]
 
 [[package]]
-name = "changeset-server"
+name = "ch-ch-changes-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow 54.3.1",
+ "chrono",
+ "duckdb",
+ "parquet",
+ "quick-xml",
+ "serde",
+ "serde_json",
+ "utoipa",
+]
+
+[[package]]
+name = "ch-ch-changes-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow 54.3.1",
  "async-stream",
  "axum",
- "changesets-core",
+ "ch-ch-changes-core",
  "chrono",
  "duckdb",
  "futures-core",
@@ -820,30 +833,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "changesets-core"
+name = "ch-ch-changes-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arrow 54.3.1",
+ "ch-ch-changes-core",
  "chrono",
- "duckdb",
- "parquet",
- "quick-xml",
- "serde",
- "serde_json",
- "utoipa",
-]
-
-[[package]]
-name = "changesets-to-parquet"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arrow 54.3.1",
- "bzip2",
- "changesets-core",
  "clap",
- "parquet",
+ "duckdb",
+ "flate2",
+ "reqwest 0.13.1",
+ "tempfile",
 ]
 
 [[package]]

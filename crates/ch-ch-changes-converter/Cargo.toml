@@ -1,14 +1,14 @@
 [package]
-name = "changesets-to-parquet"
+name = "ch-ch-changes-converter"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "changesets-to-parquet"
+name = "chch-convert"
 path = "src/main.rs"
 
 [dependencies]
-changesets-core = { path = "../changesets-core", features = ["indexing"] }
+ch-ch-changes-core = { path = "../ch-ch-changes-core", features = ["indexing"] }
 anyhow.workspace = true
 bzip2.workspace = true
 clap.workspace = true

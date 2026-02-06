@@ -1,5 +1,5 @@
 [package]
-name = "changesets-core"
+name = "ch-ch-changes-core"
 version.workspace = true
 edition.workspace = true
 
