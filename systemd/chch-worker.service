@@ -11,16 +11,7 @@ Group=chch
 WorkingDirectory=/opt/chch
 
 # Environment variables
-Environment="DATA_PATH=/opt/chch/data/changesets"
-Environment="POLL_INTERVAL_SECONDS=60"
-Environment="CHANGESET_REPLICATION_URL=https://planet.openstreetmap.org/replication/changesets/"
-Environment="HOME=/var/lib/chch"
-
-# Compaction settings (optional - disabled by default)
-# Enable to automatically compact old delta files into single files per month
-Environment="ENABLE_COMPACTION=true"
-# Hours to wait before compacting files (default: 24 = compact yesterday's data)
-Environment="COMPACTION_AGE_HOURS=24"
+EnvironmentFile=-/opt/chch/.env
 
 # Binary location
 ExecStart=/opt/chch/bin/chch-worker

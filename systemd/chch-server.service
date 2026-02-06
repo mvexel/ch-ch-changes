@@ -11,16 +11,7 @@ Group=chch
 WorkingDirectory=/opt/chch
 
 # Environment variables
-Environment="DATA_PATH=/opt/chch/data"
-Environment="RUST_LOG=info"
-Environment="HOME=/var/lib/chch"
-Environment="AUTH_DB_PATH=/var/lib/chch/auth.sqlite"
-Environment="AUTH_KEY_SECRET=YOUR_STRONG_SECRET_HERE"
-Environment="OSM_OAUTH_CLIENT_ID=YOUR_CLIENT_ID_HERE"
-Environment="OSM_OAUTH_CLIENT_SECRET=YOUR_CLIENT_SECRET_HERE"
-Environment="OSM_OAUTH_REDIRECT_URL=https://chch.osm.lol/auth/osm/callback"
-Environment="AUTH_DEFAULT_DAILY_LIMIT=0"
-Environment="AUTH_DEFAULT_MONTHLY_LIMIT=0"
+EnvironmentFile=-/opt/chch/.env
 
 # Binary location
 ExecStart=/opt/chch/bin/chch-server

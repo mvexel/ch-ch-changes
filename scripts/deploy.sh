@@ -10,6 +10,9 @@ NC='\033[0m' # No Color
 VERSION="${1:-$(date +%Y%m%d_%H%M%S)}"
 DEPLOY_DIR="/opt/chch"
 RELEASE_DIR="$DEPLOY_DIR/releases/$VERSION"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_SOURCE="$REPO_DIR/.env"
+ENV_TARGET="$DEPLOY_DIR/.env"
 
 echo -e "${YELLOW}=== Deploying ch-ch-changes version $VERSION ===${NC}"
 
@@ -24,15 +27,31 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # Step 1: Build the release binaries
-echo -e "\n${YELLOW}[1/8] Building release binaries...${NC}"
+echo -e "\n${YELLOW}[1/9] Building release binaries...${NC}"
 cargo build --release --workspace
 
 # Step 2: Create release directory
-echo -e "\n${YELLOW}[2/8] Creating release directory...${NC}"
+echo -e "\n${YELLOW}[2/9] Creating release directory...${NC}"
 mkdir -p "$RELEASE_DIR"
 
-# Step 3: Copy binary to release directory
-echo -e "\n${YELLOW}[3/8] Copying binaries...${NC}"
+# Step 3: Install env file (if missing)
+echo -e "\n${YELLOW}[3/9] Installing env file (if missing)...${NC}"
+if [ -f "$ENV_SOURCE" ]; then
+    if [ ! -f "$ENV_TARGET" ]; then
+        sudo install -m 640 "$ENV_SOURCE" "$ENV_TARGET"
+        if id "chch" &>/dev/null; then
+            sudo chown chch:chch "$ENV_TARGET"
+        fi
+        echo "Installed $ENV_TARGET"
+    else
+        echo "Env file already exists at $ENV_TARGET (leaving as-is)"
+    fi
+else
+    echo "No repo .env found at $ENV_SOURCE (skipping)"
+fi
+
+# Step 4: Copy binary to release directory
+echo -e "\n${YELLOW}[4/9] Copying binaries...${NC}"
 cp target/release/chch-server "$RELEASE_DIR/"
 cp target/release/chch-convert "$RELEASE_DIR/"
 cp target/release/chch-worker "$RELEASE_DIR/"
@@ -40,8 +59,8 @@ chmod +x "$RELEASE_DIR/chch-server"
 chmod +x "$RELEASE_DIR/chch-convert"
 chmod +x "$RELEASE_DIR/chch-worker"
 
-# Step 4: Test the binary
-echo -e "\n${YELLOW}[4/8] Testing binary...${NC}"
+# Step 5: Test the binary
+echo -e "\n${YELLOW}[5/9] Testing binary...${NC}"
 if [ ! -x "$RELEASE_DIR/chch-server" ]; then
     echo -e "${RED}Error: Binary is not executable${NC}"
     exit 1
@@ -53,11 +72,11 @@ if ! file "$RELEASE_DIR/chch-server" | grep -q "ELF.*executable"; then
 fi
 echo "Binary check passed"
 
-echo -e "\n${YELLOW}[5/8] Stopping service...${NC}"
+echo -e "\n${YELLOW}[6/9] Stopping service...${NC}"
 sudo systemctl stop chch-server
 
-# Step 5: Update symlinks
-echo -e "\n${YELLOW}[6/8] Updating symlinks...${NC}"
+# Step 7: Update symlinks
+echo -e "\n${YELLOW}[7/9] Updating symlinks...${NC}"
 ln -sfn "$RELEASE_DIR" "$DEPLOY_DIR/releases/current"
 ln -sfn "$DEPLOY_DIR/releases/current/chch-server" "$DEPLOY_DIR/bin/chch-server"
 ln -sfn "$DEPLOY_DIR/releases/current/chch-convert" "$DEPLOY_DIR/bin/chch-convert"
@@ -71,12 +90,12 @@ if [ -d "/usr/local/bin" ]; then
     sudo ln -sf "$DEPLOY_DIR/bin/chch-worker" /usr/local/bin/chch-worker
 fi
 
-# Step 6: Restart service
-echo -e "\n${YELLOW}[7/8] Restarting service...${NC}"
+# Step 8: Restart service
+echo -e "\n${YELLOW}[8/9] Restarting service...${NC}"
 sudo systemctl start chch-server
 
-# Step 7: Health check
-echo -e "\n${YELLOW}[8/8] Running health checks...${NC}"
+# Step 9: Health check
+echo -e "\n${YELLOW}[9/9] Running health checks...${NC}"
 sleep 3
 
 if systemctl is-active --quiet chch-server; then
