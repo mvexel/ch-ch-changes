@@ -26,7 +26,7 @@ quick-xml = "0.36"
 bzip2 = "0.6"
 flate2 = "1.0"
 # Reqwest with native-tls for HTTPS support (uses system OpenSSL)
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "form", "native-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "form", "native-tls", "http2"] }
 r2d2 = "0.8"
 axum = "0.8"
 # Tokio with only needed features (not "full") to reduce build size
