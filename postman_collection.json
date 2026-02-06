@@ -1,0 +1,628 @@
+{
+  "info": {
+    "name": "ch-ch-changes API",
+    "description": "OpenStreetMap Changeset Historic API - Query changeset metadata by date, time, or ID range",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{api_key}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://chch.osm.lol",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "your_api_key_here",
+      "type": "string"
+    },
+    {
+      "key": "test_date",
+      "value": "20240115",
+      "type": "string"
+    },
+    {
+      "key": "test_hour",
+      "value": "12",
+      "type": "string"
+    },
+    {
+      "key": "test_minute",
+      "value": "30",
+      "type": "string"
+    },
+    {
+      "key": "test_user",
+      "value": "mvexel",
+      "type": "string"
+    },
+    {
+      "key": "test_start_id",
+      "value": "100000",
+      "type": "string"
+    },
+    {
+      "key": "test_end_id",
+      "value": "100100",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Meta Endpoints",
+      "description": "Health and system metadata endpoints",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check if the API is running and healthy. No authentication required."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Replication State",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/meta/state",
+              "host": ["{{base_url}}"],
+              "path": ["meta", "state"]
+            },
+            "description": "Get the current replication state including sequence number and timestamp. No authentication required."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "description": "OAuth and API key management endpoints",
+      "item": [
+        {
+          "name": "Start OAuth Flow",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/osm/start",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "osm", "start"]
+            },
+            "description": "Initiate OAuth login with OpenStreetMap. Visit this URL in a browser to authenticate and receive an API key."
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Account Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "Get your account information including rate limits and usage statistics. Requires authentication."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Query by Date/Time",
+      "description": "Query changesets by specific date and time periods",
+      "item": [
+        {
+          "name": "Get Changesets by Day (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.json",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.json"]
+            },
+            "description": "Get all changesets for a specific day in JSON format. Date format: YYYYMMDD"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by Day (XML)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.xml",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.xml"]
+            },
+            "description": "Get all changesets for a specific day in OSM XML format. Date format: YYYYMMDD"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by Day (JSONL)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.jsonl",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.jsonl"]
+            },
+            "description": "Get all changesets for a specific day in JSON Lines format (one changeset per line). Efficient for streaming large results. Date format: YYYYMMDD"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by Day with Filters",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.json?user={{test_user}}&limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.json"],
+              "query": [
+                {
+                  "key": "user",
+                  "value": "{{test_user}}",
+                  "description": "Filter by username (case-sensitive)"
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Maximum number of results"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Number of results to skip"
+                }
+              ]
+            },
+            "description": "Get changesets for a day filtered by username with pagination. Supports user, uid, open, limit, offset parameters."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by Hour (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}/hour/{{test_hour}}.json",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}", "hour", "{{test_hour}}.json"]
+            },
+            "description": "Get all changesets for a specific hour. Date format: YYYYMMDD, Hour format: HH (00-23)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by Minute (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}/hour/{{test_hour}}/minute/{{test_minute}}.json",
+              "host": ["{{base_url}}"],
+              "path": [
+                "changesets",
+                "day",
+                "{{test_date}}",
+                "hour",
+                "{{test_hour}}",
+                "minute",
+                "{{test_minute}}.json"
+              ]
+            },
+            "description": "Get all changesets for a specific minute. Date: YYYYMMDD, Hour: HH (00-23), Minute: MM (00-59)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by Date Range (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/date/from/20240115/to/20240116.json",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "date", "from", "20240115", "to", "20240116.json"]
+            },
+            "description": "Get all changesets between two dates (inclusive). Maximum range: 1 day. Date format: YYYYMMDD"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by Date Range (JSONL)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/date/from/20240115/to/20240116.jsonl",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "date", "from", "20240115", "to", "20240116.jsonl"]
+            },
+            "description": "Get changesets in a date range as JSON Lines. Efficient for large result sets. Maximum range: 1 day."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Query by ID Range",
+      "description": "Query changesets by changeset ID ranges",
+      "item": [
+        {
+          "name": "Get Changesets by ID Range (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/id/from/{{test_start_id}}/to/{{test_end_id}}.json",
+              "host": ["{{base_url}}"],
+              "path": [
+                "changesets",
+                "id",
+                "from",
+                "{{test_start_id}}",
+                "to",
+                "{{test_end_id}}.json"
+              ]
+            },
+            "description": "Get changesets in an ID range (inclusive). Maximum range: 1,000,000 IDs. Results ordered by ID ascending."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by ID Range (XML)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/id/from/{{test_start_id}}/to/{{test_end_id}}.xml",
+              "host": ["{{base_url}}"],
+              "path": [
+                "changesets",
+                "id",
+                "from",
+                "{{test_start_id}}",
+                "to",
+                "{{test_end_id}}.xml"
+              ]
+            },
+            "description": "Get changesets in an ID range in OSM XML format. Maximum range: 1,000,000 IDs."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by ID Range with Filters",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/id/from/100000/to/200000.json?user={{test_user}}&limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "id", "from", "100000", "to", "200000.json"],
+              "query": [
+                {
+                  "key": "user",
+                  "value": "{{test_user}}",
+                  "description": "Filter by username"
+                },
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "Limit results"
+                },
+                {
+                  "key": "uid",
+                  "value": "",
+                  "description": "Filter by user ID",
+                  "disabled": true
+                },
+                {
+                  "key": "open",
+                  "value": "",
+                  "description": "Filter by open status (true/false)",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "description": "Skip N results",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get changesets in ID range with filters. Supports user, uid, open, limit, offset parameters."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Large ID Range (JSONL)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/id/from/1000000/to/1050000.jsonl?limit=10000",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "id", "from", "1000000", "to", "1050000.jsonl"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10000",
+                  "description": "Limit to avoid 100k result cap"
+                }
+              ]
+            },
+            "description": "Example of querying a large ID range using JSONL format for efficiency. Use limit/offset for pagination."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Advanced Queries",
+      "description": "Examples of advanced filtering and pagination",
+      "item": [
+        {
+          "name": "Get Open Changesets Only",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.json?open=true&limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.json"],
+              "query": [
+                {
+                  "key": "open",
+                  "value": "true",
+                  "description": "Only open changesets"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Get only open (not yet closed) changesets for a specific day"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Changesets by User ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.json?uid=123456",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.json"],
+              "query": [
+                {
+                  "key": "uid",
+                  "value": "123456",
+                  "description": "Filter by OSM user ID"
+                }
+              ]
+            },
+            "description": "Get changesets for a specific OSM user ID. Use uid instead of username."
+          },
+          "response": []
+        },
+        {
+          "name": "Paginated Results (Page 1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.json?limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.json"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Results per page"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Start at first result"
+                }
+              ]
+            },
+            "description": "Get first page of results (50 per page, page 1)"
+          },
+          "response": []
+        },
+        {
+          "name": "Paginated Results (Page 2)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.json?limit=50&offset=50",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.json"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Results per page"
+                },
+                {
+                  "key": "offset",
+                  "value": "50",
+                  "description": "Skip first 50 results"
+                }
+              ]
+            },
+            "description": "Get second page of results (50 per page, page 2). Increment offset by limit for each page."
+          },
+          "response": []
+        },
+        {
+          "name": "Complex Filter: User + Open Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/id/from/150000000/to/150010000.json?user={{test_user}}&open=false&limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "id", "from", "150000000", "to", "150010000.json"],
+              "query": [
+                {
+                  "key": "user",
+                  "value": "{{test_user}}",
+                  "description": "Specific username"
+                },
+                {
+                  "key": "open",
+                  "value": "false",
+                  "description": "Only closed changesets"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Combine multiple filters: get closed changesets by a specific user in an ID range"
+          },
+          "response": []
+        },
+        {
+          "name": "Query with Order By",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.json?order_by=num_changes&order_direction=DESC&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.json"],
+              "query": [
+                {
+                  "key": "order_by",
+                  "value": "num_changes",
+                  "description": "Column: id, created_at, closed_at, user, uid, num_changes, comments_count, open"
+                },
+                {
+                  "key": "order_direction",
+                  "value": "DESC",
+                  "description": "ASC or DESC"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get changesets ordered by number of changes (descending). Top 20 largest changesets."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Format Examples",
+      "description": "Examples of different output formats",
+      "item": [
+        {
+          "name": "Format: JSON (extension)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.json",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.json"]
+            },
+            "description": "Specify format using file extension (.json)"
+          },
+          "response": []
+        },
+        {
+          "name": "Format: JSON (query param)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}?format=json",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}"],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json",
+                  "description": "Format: json, xml, or jsonl"
+                }
+              ]
+            },
+            "description": "Specify format using query parameter (?format=json)"
+          },
+          "response": []
+        },
+        {
+          "name": "Format: XML (default)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}"]
+            },
+            "description": "No format specified = XML (default OSM format)"
+          },
+          "response": []
+        },
+        {
+          "name": "Format: JSONL (streaming)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/changesets/day/{{test_date}}.jsonl",
+              "host": ["{{base_url}}"],
+              "path": ["changesets", "day", "{{test_date}}.jsonl"]
+            },
+            "description": "JSON Lines format - one changeset per line. Most efficient for large results and streaming processing."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
