@@ -21,7 +21,7 @@ fi
 # Configuration
 DEPLOY_DIR="/opt/chch"
 DATA_DIR="/data/parquet"
-SERVICE_USER="changeset"
+SERVICE_USER="chch"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo -e "\n${YELLOW}[1/8] Creating system user...${NC}"
