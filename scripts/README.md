@@ -81,42 +81,6 @@ ALERT_EMAIL=admin@example.com
 */5 * * * * /path/to/scripts/healthcheck.sh
 ```
 
-### `update-data.sh`
-**Update parquet data** - Download and process the latest OSM changeset dump with zero-downtime hot swap.
-
-```bash
-sudo ./update-data.sh
-```
-
-This script:
-1. Downloads the latest changeset dump from planet.osm.org
-2. Processes it to parquet format (partitioned with indexes)
-3. Atomically swaps old data with new data (zero downtime)
-4. Restarts the service to pick up new data
-5. Runs health checks
-6. Cleans up temporary files
-
-**Features:**
-- Atomic swap - old data backed up before replacement
-- Automatic rollback on failure
-- Resume capability for interrupted downloads
-- Disk space validation
-- Full logging with timestamps
-
-**Resource requirements:**
-- ~50GB free disk space minimum
-- Processing takes 30-90 minutes depending on hardware
-- High memory usage during processing (~6-8GB)
-
-**Schedule with cron:**
-```bash
-# Weekly update on Sundays at 3 AM
-0 3 * * 0 /path/to/chch-convert/scripts/update-data.sh >> /var/log/changeset-update.log 2>&1
-```
-
-**Environment variables:**
-- `CHANGESET_URL` - Override the download URL (default: planet.osm.org)
-- `REPO_DIR` - Override repository location (auto-detected by default)
 
 ## Directory Structure
 
@@ -183,16 +147,6 @@ systemctl status chch-server
 
 # View logs
 journalctl -u chch-server -f
-```
-
-### Updating parquet data
-```bash
-# Manual update (downloads and processes latest dump)
-sudo ./scripts/update-data.sh
-
-# Or schedule weekly updates with cron
-sudo crontab -e
-# Add: 0 3 * * 0 /root/chch-convert/scripts/update-data.sh >> /var/log/changeset-update.log 2>&1
 ```
 
 ## Environment Variables
