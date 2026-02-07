@@ -95,9 +95,9 @@ def _bootstrap_from_parquet(data_path: Path) -> int | None:
     import duckdb
 
     globs = []
-    for subdir in ("base", "delta"):
+    for subdir in ("delta", "base"):
         d = data_path / subdir
-        if d.exists():
+        if d.exists() and any(d.rglob("*.parquet")):
             globs.append(str(d / "**/*.parquet"))
 
     if not globs:
