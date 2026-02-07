@@ -77,8 +77,22 @@ ORDER BY check_type DESC, value1::BIGINT
 LIMIT 100;
 SQL
 
+# Replace placeholder with actual path (handle both macOS and Linux sed)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s|\$DATA_PATH|$DATA_PATH|g" "$TEMP_SQL"
+else
+    sed -i "s|\$DATA_PATH|$DATA_PATH|g" "$TEMP_SQL"
+fi
 
+echo -e "${YELLOW}Running integrity checks (this may take a minute)...${NC}"
 echo ""
+
+# Debug: show the query
+if [[ "${DEBUG:-}" == "1" ]]; then
+    echo "Generated SQL:"
+    cat "$TEMP_SQL"
+    echo ""
+fi
 
 # Run the query
 set +e  # Temporarily disable exit on error to capture output
@@ -86,7 +100,29 @@ RESULT=$(duckdb -csv -noheader < "$TEMP_SQL" 2>&1)
 EXIT_CODE=$?
 set -e
 
+if [[ $EXIT_CODE -ne 0 ]]; then
+    echo -e "${RED}Error running integrity check (exit code: $EXIT_CODE):${NC}"
     echo "$RESULT"
+    echo ""
+    echo "Debug info:"
+    echo "  SQL file: $TEMP_SQL"
+    echo "  Data path: $DATA_PATH"
+    echo "  Base dir exists: $([ -d "$DATA_PATH/base" ] && echo "yes" || echo "no")"
+    echo "  Delta dir exists: $([ -d "$DATA_PATH/delta" ] && echo "yes" || echo "no")"
+    echo ""
+    echo "Try running with DEBUG=1 to see the generated SQL"
+    exit 1
+fi
+
+if [[ -z "$RESULT" ]]; then
+    echo -e "${YELLOW}Warning: No results returned from query${NC}"
+    echo "This might mean:"
+    echo "  - No parquet files found in $DATA_PATH/base or $DATA_PATH/delta"
+    echo "  - Files don't match the expected patterns"
+    echo ""
+    echo "Found parquet files:"
+    find "$DATA_PATH/base" -name "*.parquet" 2>/dev/null | head -5
+    find "$DATA_PATH/delta" -name "*.parquet" 2>/dev/null | head -5
     exit 1
 fi
 
