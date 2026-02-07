@@ -69,8 +69,17 @@ def update_metadata_incremental(metadata_path: Path, batch_stats: BatchStats) ->
         if key in partition_map:
             p = partition_map[key]
             p.count += count
-            p.min_id = min(p.min_id, min_id)
-            p.max_id = max(p.max_id, max_id)
+            # Handle None values for min_id/max_id (base layer may not have these)
+            if p.min_id is not None and min_id is not None:
+                p.min_id = min(p.min_id, min_id)
+            elif min_id is not None:
+                p.min_id = min_id
+
+            if p.max_id is not None and max_id is not None:
+                p.max_id = max(p.max_id, max_id)
+            elif max_id is not None:
+                p.max_id = max_id
+
             if min_created_at is not None:
                 p.min_created_at = (
                     min(p.min_created_at, min_created_at)
