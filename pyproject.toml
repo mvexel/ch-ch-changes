@@ -30,7 +30,11 @@ dev = [
 [project.scripts]
 chch-server = "ch_ch_changes.server.app:main"
 chch-worker = "ch_ch_changes.worker.main:main"
-chch-convert = "ch_ch_changes.converter.main:main"
+chch-convert-py = "ch_ch_changes.converter.main:main"
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ch_ch_changes"]

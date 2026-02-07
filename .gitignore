@@ -6,6 +6,8 @@ hetzner-config.env
 
 .DS_Store
 *.osm
+*.osm.gz
+*.osm.bz2
 
 results/
 
@@ -19,7 +21,11 @@ data/
 
 .zed/
 
-# Python
+# Rust (converter only)
+rust-converter/target/
+rust-converter/Cargo.lock
+
+# Python (server + worker)
 __pycache__/
 *.py[cod]
 *.egg-info/

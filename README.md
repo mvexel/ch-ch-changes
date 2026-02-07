@@ -78,26 +78,33 @@ The system consists of three components:
 ### 1. Converter (`chch-convert`)
 Bulk imports OSM planet changeset dumps into Parquet files.
 
+**Use the Rust converter for planet dumps** (40GB+ XML files):
+
 ```bash
-chch-convert \
+# Requires: Rust toolchain (cargo)
+cd rust-converter
+cargo run --release --bin chch-convert -- \
   --input changesets-latest.osm.bz2 \
   --output-dir /data/base \
   --partition
 ```
 
+The Rust converter is 5-10x faster and optimized for large files. See [rust-converter/README.md](rust-converter/README.md) for details. A Python converter (`chch-convert-py`) is also available for small files or testing.
+
 ### 2. Server (`chch-server`)
-FastAPI server that queries Parquet files using DuckDB.
+FastAPI (Python) server that queries Parquet files using DuckDB.
 
 - Database-less: queries Parquet files directly
 - Serves API endpoints and landing page
 - Auto-discovers new data files
 
 ### 3. Worker (`chch-worker`)
-Continuously fetches minutely replication data from OSM.
+Python worker that continuously fetches minutely replication data from OSM.
 
 - Polls OSM replication feed every 60s
 - Batches minutely data into hourly Parquet files
 - Automatically compacts old files
+- Smart backfill from base layer cutoff timestamp
 
 ## Technical Details
 
@@ -168,13 +175,47 @@ See detailed deployment guides:
 - **[Docker deployment](scripts/docker/README.md)** (recommended)
 - **[systemd deployment](scripts/systemd/README.md)** (without Docker)
 
+### Quick Start: Full Setup
+
+**Step 1: Initial data load (one-time, use Rust converter)**
+
+```bash
+# Download latest planet changeset dump
+wget https://planet.openstreetmap.org/planet/changesets-latest.osm.bz2
+
+# Install Rust (if needed)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Convert to Parquet (takes 2-4 hours for full history)
+cd rust-converter
+cargo run --release --bin chch-convert -- \
+  --input ../changesets-latest.osm.bz2 \
+  --output-dir /data/base \
+  --partition
+cd ..
+```
+
+**Step 2: Start server and worker (Python)**
+
+```bash
+# Using Docker (recommended)
+docker-compose up -d
+
+# Or using systemd
+sudo ./scripts/systemd/setup.sh
+sudo systemctl start chch-server chch-worker
+```
+
+The worker will automatically detect your base layer cutoff date and backfill from there to present.
+
 ### Production Setup
 
 1. Clone repository
-2. Configure environment variables in `.env`
-3. Deploy with Docker Compose or systemd
-4. Put behind reverse proxy (Caddy, Nginx) for HTTPS
-5. Monitor `/health` and `/meta/state` endpoints
+2. Load initial data using Rust converter (see above)
+3. Configure environment variables in `.env`
+4. Deploy with Docker Compose or systemd
+5. Put behind reverse proxy (Caddy, Nginx) for HTTPS
+6. Monitor `/health` and `/meta/state` endpoints
 
 Example Caddyfile:
 

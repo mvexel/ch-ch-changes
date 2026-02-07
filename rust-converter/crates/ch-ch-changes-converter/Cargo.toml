@@ -1,0 +1,16 @@
+[package]
+name = "ch-ch-changes-converter"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "chch-convert"
+path = "src/main.rs"
+
+[dependencies]
+ch-ch-changes-core = { path = "../ch-ch-changes-core", features = ["indexing"] }
+anyhow.workspace = true
+bzip2.workspace = true
+clap.workspace = true
+parquet.workspace = true
+arrow.workspace = true
