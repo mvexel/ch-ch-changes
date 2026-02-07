@@ -73,10 +73,11 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$DEPLOY_DIR" "$DATA_DIR"
 chmod 640 "$ENV_FILE"
 echo -e "${GREEN}✓ Set ownership to $SERVICE_USER${NC}"
 
-echo -e "\n${YELLOW}[4/8] Installing systemd service...${NC}"
+echo -e "\n${YELLOW}[4/8] Installing systemd services...${NC}"
 cp "$REPO_DIR/systemd/chch-server.service" /etc/systemd/system/
+cp "$REPO_DIR/systemd/chch-worker.service" /etc/systemd/system/
 systemctl daemon-reload
-echo -e "${GREEN}✓ Installed systemd service${NC}"
+echo -e "${GREEN}✓ Installed systemd services${NC}"
 
 echo -e "\n${YELLOW}[5/8] Making scripts executable...${NC}"
 chmod +x "$REPO_DIR/scripts"/*.sh
@@ -96,20 +97,23 @@ echo -e "\n${YELLOW}[7/8] Building and deploying initial version...${NC}"
 cd "$REPO_DIR"
 sudo -u $(logname) "$REPO_DIR/scripts/deploy.sh" "initial"
 
-echo -e "\n${YELLOW}[8/8] Enabling service...${NC}"
+echo -e "\n${YELLOW}[8/8] Enabling services...${NC}"
 systemctl enable chch-server
-echo -e "${GREEN}✓ Service enabled to start on boot${NC}"
+systemctl enable chch-worker
+echo -e "${GREEN}✓ Services enabled to start on boot${NC}"
 
 # Summary
 echo -e "\n${GREEN}=== Setup Complete ===${NC}"
 echo ""
 echo "Service status:"
-systemctl status chch-server --no-pager -l || true
+systemctl status chch-server chch-worker --no-pager -l || true
 echo ""
 echo "Next steps:"
 echo "  1. Copy your parquet files to: $DATA_DIR"
-echo "  2. Restart the service: systemctl restart chch-server"
-echo "  3. Check logs: journalctl -u chch-server -f"
+echo "  2. Restart services: systemctl restart chch-server chch-worker"
+echo "  3. Check logs:"
+echo "     - Server: journalctl -u chch-server -f"
+echo "     - Worker: journalctl -u chch-worker -f"
 echo "  4. Test the API: curl http://localhost:3000/health"
 echo ""
 echo "Optional - Set up monitoring:"

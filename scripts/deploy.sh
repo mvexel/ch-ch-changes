@@ -72,8 +72,8 @@ if ! file "$RELEASE_DIR/chch-server" | grep -q "ELF.*executable"; then
 fi
 echo "Binary check passed"
 
-echo -e "\n${YELLOW}[6/9] Stopping service...${NC}"
-sudo systemctl stop chch-server
+echo -e "\n${YELLOW}[6/9] Stopping services...${NC}"
+sudo systemctl stop chch-server chch-worker
 
 # Step 7: Update symlinks
 echo -e "\n${YELLOW}[7/9] Updating symlinks...${NC}"
@@ -90,20 +90,30 @@ if [ -d "/usr/local/bin" ]; then
     sudo ln -sf "$DEPLOY_DIR/bin/chch-worker" /usr/local/bin/chch-worker
 fi
 
-# Step 8: Restart service
-echo -e "\n${YELLOW}[8/9] Restarting service...${NC}"
+# Step 8: Restart services
+echo -e "\n${YELLOW}[8/9] Restarting services...${NC}"
 sudo systemctl start chch-server
+sudo systemctl start chch-worker
 
 # Step 9: Health check
 echo -e "\n${YELLOW}[9/9] Running health checks...${NC}"
 sleep 3
 
 if systemctl is-active --quiet chch-server; then
-    echo -e "${GREEN}✓ Service is running${NC}"
+    echo -e "${GREEN}✓ API Server is running${NC}"
 else
-    echo -e "${RED}✗ Service failed to start${NC}"
+    echo -e "${RED}✗ API Server failed to start${NC}"
     echo "Recent logs:"
     journalctl -u chch-server -n 20 --no-pager
+    exit 1
+fi
+
+if systemctl is-active --quiet chch-worker; then
+    echo -e "${GREEN}✓ Replication Worker is running${NC}"
+else
+    echo -e "${RED}✗ Replication Worker failed to start${NC}"
+    echo "Recent logs:"
+    journalctl -u chch-worker -n 20 --no-pager
     exit 1
 fi
 
@@ -116,10 +126,13 @@ fi
 # Show service status
 echo -e "\n${GREEN}=== Deployment Complete ===${NC}"
 echo "Version: $VERSION"
-echo "Status: $(systemctl is-active chch-server)"
+echo "Status:"
+echo "  API Server: $(systemctl is-active chch-server)"
+echo "  Worker:     $(systemctl is-active chch-worker)"
 echo ""
 echo "Useful commands:"
 echo "  View logs:    journalctl -u chch-server -f"
-echo "  Check status: systemctl status chch-server"
+echo "                journalctl -u chch-worker -f"
+echo "  Check status: systemctl status chch-server chch-worker"
 echo "  Rollback:     ./scripts/rollback.sh <version>"
 echo "  List releases: ls -lh $DEPLOY_DIR/releases/"
