@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -56,6 +57,14 @@ class WorkerConfig(BaseSettings):
     HOURLY_BATCHING: bool = True
     ENABLE_COMPACTION: bool = False
     COMPACTION_AGE_HOURS: int = 24
+
+    @field_validator("REPLICATION_START_SEQUENCE", "MAX_SEQUENCES_PER_RUN", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v):
+        """Convert empty strings to None for optional int fields."""
+        if v == "" or v is None:
+            return None
+        return v
 
     def get_delta_dir(self) -> Path:
         if self.DELTA_DIR:
