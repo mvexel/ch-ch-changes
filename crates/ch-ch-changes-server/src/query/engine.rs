@@ -4,13 +4,17 @@
 
 use crate::models::Changeset;
 use crate::query::{PartitionResolver, QueryBuilder};
+use ch_ch_changes_core::metadata::{DatasetMetadata, PartitionMetadata};
 use duckdb::{
     types::{TimeUnit, Value},
     Connection,
 };
 use r2d2::{Pool, PooledConnection};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
+use std::time::SystemTime;
 
 /// Custom connection manager for DuckDB with r2d2
 pub struct DuckDBConnectionManager;
@@ -33,14 +37,22 @@ impl r2d2::ManageConnection for DuckDBConnectionManager {
     }
 }
 
+/// Cache entry for metadata with timestamp
+#[derive(Debug, Clone)]
+struct MetadataCache {
+    metadata: DatasetMetadata,
+    mtime: SystemTime,
+}
+
 /// Query engine for executing DuckDB queries
 pub struct QueryEngine {
     pool: Pool<DuckDBConnectionManager>,
     data_path: PathBuf,
     partition_resolver: PartitionResolver,
+    metadata_cache: Arc<RwLock<Option<MetadataCache>>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PartitionCount {
     pub year: u32,
     pub month: u32,
@@ -71,6 +83,7 @@ impl QueryEngine {
             pool,
             data_path: PathBuf::from(data_path),
             partition_resolver,
+            metadata_cache: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -82,8 +95,7 @@ impl QueryEngine {
     }
 
     /// Helper to get the glob patterns for all parquet files
-    /// Returns patterns for both base and delta directories if they exist,
-    /// or falls back to a recursive search.
+    /// Returns patterns for both base and delta directories if they exist.
     /// Excludes index files (in base/indexes/) to avoid partition mismatches.
     fn get_glob_patterns(&self) -> Vec<String> {
         let base = self.data_path.join("base");
@@ -93,26 +105,56 @@ impl QueryEngine {
         if base.exists() {
             // Use year=*/month=*/*.parquet to only match partitioned data files
             // This excludes base/indexes/*.parquet which aren't partitioned
-            globs.push(base.join("year=*/month=*/*.parquet").to_string_lossy().to_string());
+            globs.push(
+                base.join("year=*/month=*/*.parquet")
+                    .to_string_lossy()
+                    .to_string(),
+            );
         }
         if delta.exists() {
             globs.push(delta.join("**/*.parquet").to_string_lossy().to_string());
         }
 
-        if globs.is_empty() {
-            // Fallback for tests or flat structure (year=YYYY at root)
-            globs.push(
-                self.data_path
-                    .join("year=*/**/*.parquet")
-                    .to_string_lossy()
-                    .to_string(),
-            );
+        globs
+    }
+
+    /// Get glob patterns for a specific partition (year, month)
+    fn get_partition_globs(&self, year: u32, month: u32) -> Vec<String> {
+        let base = self.data_path.join("base");
+        let delta = self.data_path.join("delta");
+        let mut globs = Vec::new();
+
+        let partition_rel = format!("year={}/month={:02}", year, month);
+
+        if base.exists() {
+            let partition_dir = base.join(&partition_rel);
+            if partition_dir.exists() {
+                globs.push(
+                    partition_dir
+                        .join("*.parquet")
+                        .to_string_lossy()
+                        .to_string(),
+                );
+            }
+        }
+
+        if delta.exists() {
+            let partition_dir = delta.join(&partition_rel);
+            if partition_dir.exists() {
+                globs.push(
+                    partition_dir
+                        .join("*.parquet")
+                        .to_string_lossy()
+                        .to_string(),
+                );
+            }
         }
 
         globs
     }
 
     /// Validate the order_by direction parameter to avoid SQL injection and invalid queries
+    #[allow(dead_code)]
     fn validate_and_build_order(
         order_by: Option<&str>,
         order_direction: Option<&str>,
@@ -129,7 +171,7 @@ impl QueryEngine {
             "uid",
             "num_changes",
             "comments_count",
-            "open"
+            "open",
         ];
 
         if !allowed_columns.contains(&column) {
@@ -150,8 +192,52 @@ impl QueryEngine {
         &self.data_path
     }
 
+    /// Load metadata from metadata.json file if available
+    /// Checks file modification time to reload if changed
+    fn load_metadata(&self) -> Option<DatasetMetadata> {
+        // Try to find metadata file
+        let candidates = [
+            self.data_path.join("delta/metadata.json"),
+            self.data_path.join("base/metadata.json"),
+            self.data_path.join("metadata.json"),
+        ];
+
+        let metadata_path = candidates.iter().find(|p| p.exists())?;
+
+        // Get current mtime
+        let current_mtime = fs::metadata(metadata_path)
+            .and_then(|m| m.modified())
+            .ok()?;
+
+        // Check cache
+        if let Ok(cache_guard) = self.metadata_cache.read() {
+            if let Some(cache) = cache_guard.as_ref() {
+                if cache.mtime == current_mtime {
+                    return Some(cache.metadata.clone());
+                }
+            }
+        }
+
+        // Reload if cache stale or missing
+        if let Ok(content) = fs::read_to_string(metadata_path) {
+            if let Ok(metadata) = serde_json::from_str::<DatasetMetadata>(&content) {
+                // Update cache
+                if let Ok(mut cache_guard) = self.metadata_cache.write() {
+                    *cache_guard = Some(MetadataCache {
+                        metadata: metadata.clone(),
+                        mtime: current_mtime,
+                    });
+                }
+                return Some(metadata);
+            }
+        }
+
+        None
+    }
+
     /// Query changesets by date range
     /// Currently not supported for performance reasons.
+    #[allow(dead_code)]
     pub fn get_changesets_by_date_range(
         &self,
         start_date: &str,
@@ -254,15 +340,40 @@ impl QueryEngine {
             return Ok(Vec::new());
         }
 
-        // Use full table scan (all partitions)
-        // Future optimization: read metadata.json and filter partitions by ID range
+        // Try to optimize using metadata if available
+        let partitions = if let Some(metadata) = self.load_metadata() {
+            let mut matched_sources: Vec<String> = Vec::new();
+
+            for partition in metadata.partitions {
+                // Check if partition ID range overlaps with requested range
+                if partition.max_id >= start_id && partition.min_id <= end_id {
+                    matched_sources
+                        .extend(self.get_partition_globs(partition.year, partition.month));
+                }
+            }
+
+            if matched_sources.is_empty() {
+                // Metadata exists but no partitions match - return empty
+                // (except if metadata is stale/incomplete? safely we can return empty if metadata is trusted)
+                return Ok(Vec::new());
+            }
+            Some(matched_sources)
+        } else {
+            None
+        };
+
+        let sources = if let Some(parts) = partitions {
+            parts
+        } else {
+            self.get_glob_patterns()
+        };
+
+        if sources.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let mut builder = QueryBuilder::new()
-            .from_parquets(
-                self.get_glob_patterns()
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect(),
-            )
+            .from_parquets(sources.iter().map(|s| s.as_str()).collect())
             .filter_id_range(start_id, end_id)
             .deduplicate()
             .order_by("id", "ASC");
@@ -273,7 +384,21 @@ impl QueryEngine {
     }
 
     /// Get the latest changeset ID available
+    /// Uses cached metadata if available, otherwise falls back to expensive MAX(id)
     pub fn get_latest_id(&self) -> Result<i64, Box<dyn std::error::Error>> {
+        // Try fast path: load from metadata
+        if let Some(metadata) = self.load_metadata() {
+            let max_id = metadata
+                .partitions
+                .iter()
+                .map(|p| p.max_id)
+                .max()
+                .unwrap_or(0);
+            return Ok(max_id);
+        }
+
+        // Fallback: expensive query
+        tracing::warn!("metadata.json not found, using slow MAX(id) query");
         let conn = self.get_conn()?;
         let globs = self.get_glob_patterns();
         let source = if globs.len() == 1 {
@@ -303,7 +428,15 @@ impl QueryEngine {
     }
 
     /// Get total changeset count
+    /// Uses cached metadata if available, otherwise falls back to expensive COUNT(DISTINCT id)
     pub fn get_total_count(&self) -> Result<u64, Box<dyn std::error::Error>> {
+        // Try fast path: load from metadata
+        if let Some(metadata) = self.load_metadata() {
+            return Ok(metadata.total_changesets);
+        }
+
+        // Fallback: expensive query (only if metadata.json is missing)
+        tracing::warn!("metadata.json not found, using slow COUNT(DISTINCT id) query");
         let conn = self.get_conn()?;
         let globs = self.get_glob_patterns();
         let source = if globs.len() == 1 {
@@ -334,6 +467,19 @@ impl QueryEngine {
     }
 
     pub fn get_earliest_id(&self) -> Result<i64, Box<dyn std::error::Error>> {
+        // Try fast path: load from metadata
+        if let Some(metadata) = self.load_metadata() {
+            let min_id = metadata
+                .partitions
+                .iter()
+                .map(|p| p.min_id)
+                .min()
+                .unwrap_or(0);
+            return Ok(min_id);
+        }
+
+        // Fallback: expensive query
+        tracing::warn!("metadata.json not found, using slow MIN(id) query");
         let conn = self.get_conn()?;
         let globs = self.get_glob_patterns();
         let source = if globs.len() == 1 {
@@ -361,9 +507,17 @@ impl QueryEngine {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_created_at_bounds(
         &self,
     ) -> Result<(Option<i64>, Option<i64>), Box<dyn std::error::Error>> {
+        // Try fast path: load from metadata
+        if let Some(metadata) = self.load_metadata() {
+            if metadata.min_created_at.is_some() && metadata.max_created_at.is_some() {
+                return Ok((metadata.min_created_at, metadata.max_created_at));
+            }
+        }
+
         let conn = self.get_conn()?;
         let globs = self.get_glob_patterns();
         let source = if globs.len() == 1 {
@@ -396,7 +550,21 @@ impl QueryEngine {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_partition_counts(&self) -> Result<Vec<PartitionCount>, Box<dyn std::error::Error>> {
+        // Try fast path: load from metadata
+        if let Some(metadata) = self.load_metadata() {
+            return Ok(metadata
+                .partitions
+                .iter()
+                .map(|p| PartitionCount {
+                    year: p.year,
+                    month: p.month,
+                    count: p.count,
+                })
+                .collect());
+        }
+
         let conn = self.get_conn()?;
         let files = list_parquet_files(self.data_path());
         let mut counts_map: std::collections::HashMap<(u32, u32), u64> =
@@ -625,7 +793,6 @@ mod serde_duckdb {
     use crate::models::Changeset;
     use duckdb::Row;
 
-
     pub fn from_row(row: &Row) -> Result<Changeset, duckdb::Error> {
         // Helper macro to reduce boilerplate for optional field extraction
         macro_rules! get_opt {
@@ -684,10 +851,12 @@ mod tests {
 
     fn setup_parquet_dir() -> TempDir {
         let dir = TempDir::new().expect("tempdir");
-        let year_dir = dir.path().join("year=2024");
-        fs::create_dir_all(&year_dir).expect("year dir");
+        let base_dir = dir.path().join("base");
+        let year_dir = base_dir.join("year=2024");
+        let month_dir = year_dir.join("month=05");
+        fs::create_dir_all(&month_dir).expect("month dir");
 
-        let parquet_path = year_dir.join("month=05.parquet");
+        let parquet_path = month_dir.join("data.parquet");
         let conn = Connection::open_in_memory().expect("duckdb");
 
         // Schema must include tags as MAP
@@ -799,7 +968,9 @@ mod tests {
             .get_changesets_by_id_range(1, 10, &filters)
             .expect("query");
 
-        assert!(results.iter().all(|cs| cs.user.as_ref().unwrap() == "alice"));
+        assert!(results
+            .iter()
+            .all(|cs| cs.user.as_ref().unwrap() == "alice"));
     }
 
     #[test]
@@ -812,5 +983,156 @@ mod tests {
             .expect("query");
 
         assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_load_metadata_reload() {
+        let dir = setup_parquet_dir();
+        let engine = QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
+
+        // Initial state: no metadata, should fallback to full scan (2 results)
+        let results = engine
+            .get_changesets_by_id_range(1, 2, &QueryFilters::new())
+            .expect("query");
+        assert_eq!(results.len(), 2);
+
+        // Write metadata file
+        let metadata = DatasetMetadata {
+            version: "1.0".to_string(),
+            generated_at: "2024-05-02T12:00:00Z".to_string(),
+            total_changesets: 2,
+            partition_count: 1,
+            min_created_at: None,
+            max_created_at: None,
+            partitions: vec![PartitionMetadata {
+                year: 2024,
+                month: 5,
+                path: "year=2024/month=05".to_string(),
+                count: 2,
+                min_id: 1,
+                max_id: 2,
+                min_created_at: None,
+                max_created_at: None,
+            }],
+        };
+        let metadata_path = dir.path().join("metadata.json");
+        let file = fs::File::create(&metadata_path).expect("create metadata");
+        serde_json::to_writer(file, &metadata).expect("write metadata");
+
+        // Force a reload by calling load_metadata implicitly via get_changesets
+        let results = engine
+            .get_changesets_by_id_range(1, 2, &QueryFilters::new())
+            .expect("query");
+        assert_eq!(results.len(), 2);
+
+        // Modify metadata to exclude partitions (simulating a change)
+        // Sleep to ensure mtime changes
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let metadata_empty = DatasetMetadata {
+            version: "1.0".to_string(),
+            generated_at: "2024-05-02T12:00:00Z".to_string(),
+            total_changesets: 0,
+            partition_count: 0,
+            min_created_at: None,
+            max_created_at: None,
+            partitions: vec![],
+        };
+        let file = fs::File::create(&metadata_path).expect("update metadata");
+        serde_json::to_writer(file, &metadata_empty).expect("write metadata");
+
+        // Now caching pruning should result in 0 results because metadata has no partitions
+        let results = engine
+            .get_changesets_by_id_range(1, 2, &QueryFilters::new())
+            .expect("query");
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_partition_pruning() {
+        let dir = setup_parquet_dir();
+        // Create a fake second partition file
+        let base_dir = dir.path().join("base");
+        let year_dir = base_dir.join("year=2024");
+        // It already has month=05/data.parquet from setup
+        // Create month=06/data.parquet with IDs 3, 4
+        let month_06_dir = year_dir.join("month=06");
+        fs::create_dir_all(&month_06_dir).expect("month 06 dir");
+        let parquet_path_06 = month_06_dir.join("data.parquet");
+
+        let conn = Connection::open_in_memory().expect("duckdb");
+        conn.execute_batch("
+            CREATE TABLE changesets (id BIGINT, replication_sequence BIGINT, created_at TIMESTAMP, closed_at TIMESTAMP, open BOOLEAN, user VARCHAR, uid BIGINT, min_lat DOUBLE, min_lon DOUBLE, max_lat DOUBLE, max_lon DOUBLE, num_changes INTEGER, comments_count INTEGER, description VARCHAR, tags MAP(VARCHAR, VARCHAR));
+            INSERT INTO changesets VALUES (3, 120, TIMESTAMP '2024-06-01 00:00:00', NULL, true, 'charlie', 30, 0, 0, 0, 0, 1, 0, 'third', MAP {});
+         ").expect("insert 06");
+        let parquet_path_sql = parquet_path_06.to_string_lossy().replace('"', "''");
+        conn.execute_batch(&format!(
+            "COPY changesets TO '{}' (FORMAT PARQUET);",
+            parquet_path_sql
+        ))
+        .expect("copy");
+
+        // Create metadata covering both
+        let metadata = DatasetMetadata {
+            version: "1.0".to_string(),
+            generated_at: "2024-05-02T12:00:00Z".to_string(),
+            total_changesets: 3,
+            partition_count: 2,
+            min_created_at: None,
+            max_created_at: None,
+            partitions: vec![
+                PartitionMetadata {
+                    year: 2024,
+                    month: 5,
+                    path: "year=2024/month=05".to_string(),
+                    count: 2,
+                    min_id: 1,
+                    max_id: 2,
+                    min_created_at: None,
+                    max_created_at: None,
+                },
+                PartitionMetadata {
+                    year: 2024,
+                    month: 6,
+                    path: "year=2024/month=06".to_string(),
+                    count: 1,
+                    min_id: 3,
+                    max_id: 4,
+                    min_created_at: None,
+                    max_created_at: None,
+                },
+            ],
+        };
+        let metadata_path = dir.path().join("metadata.json");
+        let file = fs::File::create(&metadata_path).expect("create metadata");
+        serde_json::to_writer(file, &metadata).expect("write metadata");
+
+        let engine = QueryEngine::new(dir.path().to_str().unwrap()).expect("engine");
+
+        // Query range 1-2: should only hit month=05 (ids 1, 2)
+        let results = engine
+            .get_changesets_by_id_range(1, 2, &QueryFilters::new())
+            .expect("query 1-2");
+        assert_eq!(results.len(), 2);
+        let ids: Vec<i64> = results.iter().map(|c| c.id).collect();
+        assert!(ids.contains(&1));
+        assert!(ids.contains(&2));
+        assert!(!ids.contains(&3));
+
+        // Query range 3-4: should only hit month=06 (id 3)
+        let results = engine
+            .get_changesets_by_id_range(3, 4, &QueryFilters::new())
+            .expect("query 3-4");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, 3);
+
+        // Query range 2-3: should hit both
+        let results = engine
+            .get_changesets_by_id_range(2, 3, &QueryFilters::new())
+            .expect("query 2-3");
+        assert_eq!(results.len(), 2);
+        let ids: Vec<i64> = results.iter().map(|c| c.id).collect();
+        assert!(ids.contains(&2));
+        assert!(ids.contains(&3));
     }
 }

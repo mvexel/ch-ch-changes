@@ -3,6 +3,9 @@ name = "ch-ch-changes-server"
 version.workspace = true
 edition.workspace = true
 
+[features]
+openapi = ["ch-ch-changes-core/openapi"]
+
 [[bin]]
 name = "chch-server"
 path = "src/main.rs"

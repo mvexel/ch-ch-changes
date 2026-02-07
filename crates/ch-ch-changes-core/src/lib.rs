@@ -7,6 +7,7 @@ use utoipa::ToSchema;
 pub mod builder;
 #[cfg(feature = "indexing")]
 pub mod indexing;
+pub mod metadata;
 pub mod models;
 pub mod parsing;
 pub mod schema;
