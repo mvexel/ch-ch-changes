@@ -56,24 +56,30 @@ gaps AS (
         '$DATA_PATH/delta/**/*.parquet'
     ])
     ORDER BY id
+),
+combined AS (
+    SELECT 
+        'Summary' as check_type,
+        min_id::VARCHAR as value1,
+        max_id::VARCHAR as value2,
+        count::VARCHAR as value3,
+        (expected_count - count)::VARCHAR as value4,
+        0 as sort_order
+    FROM changeset_ranges
+    UNION ALL
+    SELECT 
+        'Gap' as check_type,
+        gap_start::VARCHAR as value1,
+        next_id::VARCHAR as value2,
+        gap_size::VARCHAR as value3,
+        '' as value4,
+        gap_start::BIGINT as sort_order
+    FROM gaps
+    WHERE gap_size > 0
 )
-SELECT 
-    'Summary' as check_type,
-    min_id::VARCHAR as value1,
-    max_id::VARCHAR as value2,
-    count::VARCHAR as value3,
-    (expected_count - count)::VARCHAR as value4
-FROM changeset_ranges
-UNION ALL
-SELECT 
-    'Gap' as check_type,
-    gap_start::VARCHAR as value1,
-    next_id::VARCHAR as value2,
-    gap_size::VARCHAR as value3,
-    '' as value4
-FROM gaps
-WHERE gap_size > 0
-ORDER BY check_type DESC, value1::BIGINT
+SELECT check_type, value1, value2, value3, value4
+FROM combined
+ORDER BY CASE WHEN check_type = 'Summary' THEN 0 ELSE 1 END, sort_order
 LIMIT 100;
 SQL
 
