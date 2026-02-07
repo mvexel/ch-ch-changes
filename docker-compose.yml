@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  server:
+    build: .
+    image: chch:latest
+    container_name: chch-server
+    command: ch_ch_changes.server.app
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - ${DATA_PATH:-./data}:/data
+    environment:
+      - DATA_PATH=/data
+      - HOST=0.0.0.0
+      - PORT=3000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - REQUIRE_AUTH=${REQUIRE_AUTH:-false}
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  worker:
+    build: .
+    image: chch:latest
+    container_name: chch-worker
+    command: ch_ch_changes.worker.main
+    volumes:
+      - ${DATA_PATH:-./data}:/data
+    environment:
+      - DATA_PATH=/Users/mvexel/data/changesets
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - REPLICATION_START_SEQUENCE=${REPLICATION_START_SEQUENCE:-}
+      - POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-60}
+      - MAX_SEQUENCES_PER_RUN=${MAX_SEQUENCES_PER_RUN:-100}
+      - HOURLY_BATCHING=${HOURLY_BATCHING:-true}
+      - ENABLE_COMPACTION=${ENABLE_COMPACTION:-true}
+      - COMPACTION_AGE_HOURS=${COMPACTION_AGE_HOURS:-24}
+    restart: unless-stopped

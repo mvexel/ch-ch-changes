@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from ch_ch_changes.config import ServerConfig
 from ch_ch_changes.server.query import QueryEngine
@@ -46,6 +49,16 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     app.include_router(meta.router)
     app.include_router(changesets.router)
     app.include_router(auth.router)
+
+    # Serve static files (landing page + assets)
+    static_dir = Path(__file__).parent.parent.parent.parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+        @app.get("/", include_in_schema=False)
+        async def root():
+            """Serve the landing page."""
+            return FileResponse(static_dir / "index.html")
 
     return app
 

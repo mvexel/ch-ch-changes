@@ -1,30 +1,105 @@
 # ch-ch-changes
 
-![bowie](https://chch.osm.lol/CH-CH-CHANGES.png)
+![bowie](https://chch.osm.lol/static/CH-CH-CHANGES.png)
 
 *The missing API for OSM Changeset Metadata queries.*
 
-The OpenStreetMap API [lets you query changeset metadata](https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets), but the usefulness of that API is limited by a result maximum of 100.
+The OpenStreetMap API [lets you query changeset metadata](https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets), but is limited to 100 results per query.
 
-This API lets you query by entire days, hours, minutes, or a range of changeset IDs, and supports additional output formats like `jsonl` for efficient streaming processing.
+This API lets you query by entire days, hours, minutes, or ID ranges, and supports multiple output formats (XML, JSON, JSONL) for efficient batch processing.
+
+## Quick Start
+
+### With Docker (recommended)
+
+```bash
+# Start server and worker
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f
+
+# Access API
+curl http://localhost:3000/health
+```
+
+See [scripts/docker/README.md](scripts/docker/README.md) for full Docker deployment guide.
+
+### Without Docker
+
+Requires Python 3.11+
+
+```bash
+# Install
+pip install -e .
+
+# Start server
+chch-server
+
+# Or run worker
+chch-worker
+```
+
+See [scripts/systemd/README.md](scripts/systemd/README.md) for native deployment guide.
+
+## API Examples
+
+```bash
+# Health check
+curl http://localhost:3000/health
+
+# All changesets on a specific day (JSON)
+curl http://localhost:3000/changesets/day/20240115.json
+
+# Changesets in a specific hour (XML)
+curl http://localhost:3000/changesets/day/20240115/hour/14
+
+# Changesets by ID range with filters
+curl 'http://localhost:3000/changesets/id/from/100000/to/200000.json?user=alice&limit=100'
+
+# Dataset statistics
+curl http://localhost:3000/meta/state
+```
 
 ## About Changesets
 
-Each time an OpenStreetMap contributor uploads edits, a **changeset** is created.  
+Each time an OpenStreetMap contributor uploads edits, a **changeset** is created.
 A changeset has two components:
 
 - **Metadata** — when it was opened/closed, by whom, editor used, and contextual tags (this API)
 - **Map changes** — the actual edits to OSM data
 
-The tools / server in this project deal with the metadata only. 
+This API provides the metadata only.
+
+## Architecture
+
+The system consists of three components:
+
+### 1. Converter (`chch-convert`)
+Bulk imports OSM planet changeset dumps into Parquet files.
+
+```bash
+chch-convert \
+  --input changesets-latest.osm.bz2 \
+  --output-dir /data/base \
+  --partition
+```
+
+### 2. Server (`chch-server`)
+FastAPI server that queries Parquet files using DuckDB.
+
+- Database-less: queries Parquet files directly
+- Serves API endpoints and landing page
+- Auto-discovers new data files
+
+### 3. Worker (`chch-worker`)
+Continuously fetches minutely replication data from OSM.
+
+- Polls OSM replication feed every 60s
+- Batches minutely data into hourly Parquet files
+- Automatically compacts old files
 
 ## Technical Details
-
-The system basically consists of three Rust binaries:
-
-- `changesets-to-parquet` — archive ingestion
-- `changeset-server` — API server
-- `changeset-replication-worker` — minutely replication ingestion
 
 ### Database-less Architecture
 
@@ -33,14 +108,12 @@ The system basically consists of three Rust binaries:
 - No indexes, no traditional DB
 - Works on local disk, NFS, or S3-compatible storage
 
-
 ### Lambda Architecture
 
 - **Base layer** — immutable weekly planet snapshots
 - **Delta layer** — minutely replication batched into hourly Parquet
 
 Queries read both layers and deduplicate via `replication_sequence`.
-
 
 ### Smart Batching
 
@@ -52,19 +125,19 @@ Replication data is flushed when:
 
 This avoids millions of tiny files while keeping data fresh.
 
+### Automatic Discovery
 
-### Zero-Downtime Updates
-
-The API watches the filesystem and immediately serves new Parquet partitions as they appear.
+The server scans for new Parquet files every 30 seconds and automatically serves them.
 
 ### Trade-offs and Quirks
 
 - Date ranges limited to 1 day
-- >100k changesets rejected
+- ID ranges limited to 1M span, 100k results
 - Deduplication happens at query-time
 - No spatial queries or SQL interface
-- Replication state files are off-by-one (handled internally)
+- Read-only fixed endpoints
 
+## Data Flow
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
@@ -79,7 +152,7 @@ The API watches the filesystem and immediately serves new Parquet partitions as 
                                                           │
                         ┌──────────────────┐     ┌────────▼────────┐
                         │   API Server     │◀────│   DuckDB        │
-                        │   (Axum)         │     │   (in-memory)   │
+                        │   (FastAPI)      │     │   (in-process)  │
                         └────────┬─────────┘     └─────────────────┘
                                  │
                         ┌────────▼─────────┐
@@ -87,3 +160,87 @@ The API watches the filesystem and immediately serves new Parquet partitions as 
                         │   (JSON/XML/JSONL│
                         └──────────────────┘
 ```
+
+## Deployment
+
+See detailed deployment guides:
+
+- **[Docker deployment](scripts/docker/README.md)** (recommended)
+- **[systemd deployment](scripts/systemd/README.md)** (without Docker)
+
+### Production Setup
+
+1. Clone repository
+2. Configure environment variables in `.env`
+3. Deploy with Docker Compose or systemd
+4. Put behind reverse proxy (Caddy, Nginx) for HTTPS
+5. Monitor `/health` and `/meta/state` endpoints
+
+Example Caddyfile:
+
+```
+chch.osm.lol {
+    reverse_proxy localhost:3000
+}
+```
+
+## Development
+
+```bash
+# Install with dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest tests/ -v
+
+# Lint and format
+ruff check src/ tests/
+ruff format src/ tests/
+
+# Start server with hot reload
+uvicorn ch_ch_changes.server.app:create_app --factory --reload
+```
+
+## Configuration
+
+All configuration via environment variables:
+
+```bash
+# Server
+DATA_PATH=/path/to/data          # Where parquet files live
+HOST=0.0.0.0                     # Listen address
+PORT=3000                        # HTTP port
+LOG_LEVEL=INFO                   # DEBUG, INFO, WARNING, ERROR
+
+# Worker
+POLL_INTERVAL_SECONDS=60         # How often to check for new data
+MAX_SEQUENCES_PER_RUN=1000       # Max sequences per poll
+HOURLY_BATCHING=true             # Batch minutely data into hourly files
+ENABLE_COMPACTION=true           # Merge old hourly files
+COMPACTION_AGE_HOURS=24          # Only compact files older than this
+```
+
+## Data Directory Structure
+
+```
+/data/
+├── base/                          # Base layer (planet dumps)
+│   └── year=YYYY/month=MM/*.parquet
+├── delta/                         # Delta layer (replication)
+│   ├── year=YYYY/month=MM/*.parquet
+│   └── state.yaml                 # Replication state
+└── metadata.json                  # Dataset statistics (auto-generated)
+```
+
+## See Also
+
+- [OpenStreetMap planet downloads](https://planet.osm.org) — source data
+- [Changeset wiki page](https://wiki.openstreetmap.org/wiki/Changeset) — about changesets
+- [OSMCha](https://osmcha.org) — inspect actual map edits
+
+## License
+
+ISC License
+
+Data from [OpenStreetMap](https://www.openstreetmap.org) © OpenStreetMap contributors,
+available under the [Open Database License](https://opendatacommons.org/licenses/odbl/).
