@@ -7,6 +7,10 @@ edition.workspace = true
 name = "chch-worker"
 path = "src/main.rs"
 
+[[bin]]
+name = "backfill-metadata"
+path = "src/bin/backfill_metadata.rs"
+
 [dependencies]
 ch-ch-changes-core = { path = "../ch-ch-changes-core" }
 anyhow.workspace = true
@@ -15,6 +19,7 @@ clap.workspace = true
 duckdb.workspace = true
 flate2.workspace = true
 reqwest.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

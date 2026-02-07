@@ -81,6 +81,26 @@ ALERT_EMAIL=admin@example.com
 */5 * * * * /path/to/scripts/healthcheck.sh
 ```
 
+## Maintenance Tools
+
+### Metadata Backfill (One-time)
+**Generate metadata.json from existing parquet files** - Run once before deploying v0.2+ for instant `/meta/state` performance.
+
+```bash
+# From repository root
+cargo run --release --bin backfill-metadata -- --data-path /path/to/data
+
+# Or with environment variable
+DATA_PATH=/opt/chch/data/changesets cargo run --release --bin backfill-metadata
+```
+
+This one-time script:
+- Scans all existing parquet files in `base/` and `delta/`
+- Efficiently computes statistics (min/max IDs, counts per partition)
+- Generates `metadata.json` for fast API queries
+- Takes a few minutes even for large datasets (reads parquet metadata, not full data)
+
+**When to run:** Before deploying code updates that include the `/meta/state` optimization. After running, the endpoint will respond in milliseconds instead of seconds. The worker will then keep metadata.json updated automatically as new batches are processed.
 
 ## Directory Structure
 

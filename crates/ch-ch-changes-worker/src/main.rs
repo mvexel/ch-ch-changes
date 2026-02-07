@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use ch_ch_changes_core::{
-    parsing::parse_xml_to_channel, schema::create_schema,
-    writer::consume_and_write_partitioned_parallel, Changeset,
+    metadata::{update_metadata_incremental, BatchStats},
+    parsing::parse_xml_to_channel,
+    schema::create_schema,
+    writer::consume_and_write_partitioned_parallel,
+    Changeset,
 };
 use chrono::{DateTime, Datelike, NaiveDateTime, TimeZone, Timelike, Utc};
 use clap::Parser;
@@ -820,6 +823,10 @@ fn process_sequence(
     let seq_state =
         fetch_sequence_state(client, base_url, sequence)?.context("Missing sequence state file")?;
 
+    // Parse sequence to get changesets for metadata computation
+    let changesets = parse_sequence(client, base_url, sequence, temp_root, args)?;
+    let batch_stats = BatchStats::from_changesets(&changesets);
+
     let sequence_dir = temp_root.join(format!("seq-{:09}", sequence));
     if sequence_dir.exists() {
         fs::remove_dir_all(&sequence_dir)
@@ -827,32 +834,28 @@ fn process_sequence(
     }
     fs::create_dir_all(&sequence_dir)?;
 
-    let diff_path = sequence_dir.join("changeset.osm.gz");
-    let diff_url = sequence_diff_url(base_url, sequence);
-    download_file(client, &diff_url, &diff_path)?;
-
     let output_dir = sequence_dir.join("output");
-    let file = File::open(&diff_path)?;
-    let decoder = GzDecoder::new(file);
+    fs::create_dir_all(&output_dir)?;
 
+    // Write changesets
     let (tx, rx) = sync_channel(32);
-    let continue_on_error = args.continue_on_error;
-    let parser_handle = thread::spawn(move || {
-        parse_xml_to_channel(decoder, tx, continue_on_error);
+    let output_dir_clone = output_dir.clone();
+    let batch_size = args.batch_size;
+    let writer_handle = thread::spawn(move || {
+        let schema = create_schema();
+        consume_and_write_partitioned_parallel(rx, output_dir_clone, schema, batch_size, None)
     });
 
-    let schema = create_schema();
-    let (total_count, summary) = consume_and_write_partitioned_parallel(
-        rx,
-        output_dir.clone(),
-        schema,
-        args.batch_size,
-        None,
-    )?;
-
-    if parser_handle.join().is_err() {
-        return Err(anyhow::anyhow!("Parser thread panicked"));
+    // Send changesets in batches
+    let chunk_size = 1000;
+    for chunk in changesets.chunks(chunk_size) {
+        tx.send(Ok(chunk.to_vec()))?;
     }
+    drop(tx);
+
+    let (total_count, summary) = writer_handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("Writer thread panicked"))??;
 
     log_info(&format!(
         "Sequence {}: wrote {} changesets across {} partitions",
@@ -862,6 +865,12 @@ fn process_sequence(
     ));
 
     move_output_files(&output_dir, delta_dir, sequence)?;
+
+    // Update metadata.json incrementally
+    let metadata_path = delta_dir.join("metadata.json");
+    if let Err(e) = update_metadata_incremental(&metadata_path, &batch_stats) {
+        log_warn(&format!("Failed to update metadata.json: {}", e));
+    }
 
     if !args.keep_temp {
         fs::remove_dir_all(&sequence_dir)
@@ -1028,6 +1037,9 @@ fn write_hourly_batch(
         return Ok(());
     }
 
+    // Compute batch statistics for metadata update
+    let batch_stats = BatchStats::from_changesets(&changesets);
+
     let batch_dir = temp_root.join(format!("batch-{}", hour_string));
     if batch_dir.exists() {
         fs::remove_dir_all(&batch_dir)?;
@@ -1065,6 +1077,12 @@ fn write_hourly_batch(
 
     // Move output files with hourly naming
     move_output_files_hourly(&output_dir, delta_dir, hour_string)?;
+
+    // Update metadata.json incrementally
+    let metadata_path = delta_dir.join("metadata.json");
+    if let Err(e) = update_metadata_incremental(&metadata_path, &batch_stats) {
+        log_warn(&format!("Failed to update metadata.json: {}", e));
+    }
 
     if !keep_temp {
         fs::remove_dir_all(&batch_dir)

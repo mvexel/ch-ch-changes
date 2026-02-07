@@ -843,6 +843,7 @@ dependencies = [
  "duckdb",
  "flate2",
  "reqwest 0.13.1",
+ "serde_json",
  "tempfile",
 ]
 

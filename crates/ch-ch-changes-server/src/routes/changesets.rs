@@ -4,8 +4,8 @@ use crate::format::{
     json::JsonFormatter, jsonl::JsonLinesFormatter, xml::XmlFormatter, Formatter,
     StreamingFormatter,
 };
-use crate::models::{ApiError, Changeset};
 use crate::models::error::ErrorResponse;
+use crate::models::{ApiError, Changeset};
 use crate::query::engine::QueryFilters;
 use crate::state::AppState;
 use axum::{
@@ -698,8 +698,12 @@ pub async fn get_changesets_by_id_range(
         _ => {
             return ApiError::bad_request_with_details(
                 "Invalid start ID",
-                format!("'{}' is not a valid changeset ID. Must be a positive integer", start_raw)
-            ).into_response()
+                format!(
+                    "'{}' is not a valid changeset ID. Must be a positive integer",
+                    start_raw
+                ),
+            )
+            .into_response()
         }
     };
 
@@ -709,8 +713,12 @@ pub async fn get_changesets_by_id_range(
         _ => {
             return ApiError::bad_request_with_details(
                 "Invalid end ID",
-                format!("'{}' is not a valid changeset ID. Must be a positive integer", end_str)
-            ).into_response()
+                format!(
+                    "'{}' is not a valid changeset ID. Must be a positive integer",
+                    end_str
+                ),
+            )
+            .into_response()
         }
     };
 
@@ -718,8 +726,12 @@ pub async fn get_changesets_by_id_range(
     if start_id > end_id {
         return ApiError::bad_request_with_details(
             "Invalid ID range",
-            format!("start_id ({}) must be less than or equal to end_id ({})", start_id, end_id)
-        ).into_response()
+            format!(
+                "start_id ({}) must be less than or equal to end_id ({})",
+                start_id, end_id
+            ),
+        )
+        .into_response();
     }
 
     // Safety limit: Maximum 1,000,000 ID range
@@ -789,10 +801,12 @@ mod tests {
 
     async fn setup_state() -> (TempDir, AppState) {
         let dir = TempDir::new().expect("tempdir");
-        let year_dir = dir.path().join("year=2024");
-        fs::create_dir_all(&year_dir).expect("year dir");
+        let base_dir = dir.path().join("base");
+        let year_dir = base_dir.join("year=2024");
+        let month_dir = year_dir.join("month=05");
+        fs::create_dir_all(&month_dir).expect("month dir");
 
-        let parquet_path = year_dir.join("month=05.parquet");
+        let parquet_path = month_dir.join("data.parquet");
         let conn = Connection::open_in_memory().expect("duckdb");
 
         conn.execute_batch(

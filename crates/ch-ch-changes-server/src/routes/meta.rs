@@ -10,8 +10,9 @@
 //! - 200 OK with JSON metadata
 //! - 500 Internal Server Error if metadata unavailable
 
-use crate::models::ApiError;
 use crate::models::error::ErrorResponse;
+use crate::models::ApiError;
+use crate::query::engine::PartitionCount;
 use crate::state::AppState;
 use crate::API_VERSION;
 use axum::{extract::State, Json};
@@ -50,6 +51,14 @@ pub struct ReplicationStateResponse {
     pub osm_sequence: Option<u64>,
     /// Number of sequences behind OSM (null if OSM sequence unavailable)
     pub sequences_behind: Option<i64>,
+    /// Minimum created_at timestamp in dataset (epoch millis)
+    pub min_created_at: Option<i64>,
+    /// Maximum created_at timestamp in dataset (epoch millis)
+    pub max_created_at: Option<i64>,
+    /// Number of partitions
+    pub partition_count: usize,
+    /// Detailed partition counts
+    pub partitions: Vec<PartitionCount>,
 }
 
 /// Health check endpoint
@@ -64,9 +73,16 @@ pub struct ReplicationStateResponse {
     tag = "Meta"
 )]
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
-    let parquet_files = list_parquet_files(state.engine.data_path());
-    let partition_count = parquet_files.len() as u32;
-    let data_loaded = partition_count > 0;
+    let data_path = state.engine.data_path().to_path_buf();
+
+    // Run blocking I/O in a separate thread
+    let (partition_count, data_loaded) = tokio::task::spawn_blocking(move || {
+        let parquet_files = list_parquet_files(&data_path);
+        let count = parquet_files.len() as u32;
+        (count, count > 0)
+    })
+    .await
+    .unwrap_or((0, false));
 
     Json(HealthResponse {
         status: "ok".to_string(),
@@ -97,10 +113,17 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 pub async fn get_replication_state(
     State(state): State<AppState>,
 ) -> Result<Json<ReplicationStateResponse>, ApiError> {
-    let data_path = state.engine.data_path();
-    let (state_path, content) = load_replication_state_file(data_path)
-        .map_err(|e| ApiError::internal_error_with_details("Failed to read replication state", e))?
-        .ok_or_else(|| ApiError::not_found("Replication state not found"))?;
+    let data_path = state.engine.data_path().to_path_buf();
+
+    // Run blocking file I/O in a separate thread
+    let (state_path, content) =
+        tokio::task::spawn_blocking(move || load_replication_state_file(&data_path))
+            .await
+            .map_err(|e| ApiError::internal_error_with_details("Task join error", e.to_string()))?
+            .map_err(|e| {
+                ApiError::internal_error_with_details("Failed to read replication state", e)
+            })?
+            .ok_or_else(|| ApiError::not_found("Replication state not found"))?;
 
     let (sequence, last_run_str, last_run_dt) = parse_replication_state(&content).map_err(|e| {
         ApiError::internal_error_with_details("Failed to parse replication state", e)
@@ -110,10 +133,16 @@ pub async fn get_replication_state(
     let now = Utc::now();
     let seconds_since_update = (now - last_run_dt).num_seconds();
 
-    // Get dataset statistics (these are fast queries using DuckDB's metadata)
+    // Get dataset statistics (uses cached metadata.json for fast lookups)
+    // These database operations are theoretically blocking but check generic cache first.
+    // Ideally we'd make these async in the engine too, but for now we focus on file I/O.
     let earliest_changeset_id = state.engine.get_earliest_id().ok();
     let latest_changeset_id = state.engine.get_latest_id().ok();
     let total_changesets = state.engine.get_total_count().ok();
+    let (min_created_at, max_created_at) =
+        state.engine.get_created_at_bounds().unwrap_or((None, None));
+    let partitions = state.engine.get_partition_counts().unwrap_or_default();
+    let partition_count = partitions.len();
 
     // Fetch OSM's current replication state (async, may fail)
     let (osm_sequence, sequences_behind) = fetch_osm_replication_state(sequence).await;
@@ -128,6 +157,10 @@ pub async fn get_replication_state(
         total_changesets,
         osm_sequence,
         sequences_behind,
+        min_created_at,
+        max_created_at,
+        partition_count,
+        partitions,
     }))
 }
 
@@ -195,7 +228,8 @@ fn parse_replication_state(content: &str) -> Result<(u64, String, DateTime<Utc>)
     }
 
     let sequence = sequence.ok_or_else(|| "Missing sequence in replication state".to_string())?;
-    let last_run_dt = last_run.ok_or_else(|| "Missing last_run in replication state".to_string())?;
+    let last_run_dt =
+        last_run.ok_or_else(|| "Missing last_run in replication state".to_string())?;
     let last_run_str = last_run_dt.to_rfc3339_opts(SecondsFormat::Secs, true);
 
     Ok((sequence, last_run_str, last_run_dt))
@@ -204,12 +238,11 @@ fn parse_replication_state(content: &str) -> Result<(u64, String, DateTime<Utc>)
 /// Fetch OSM's current replication sequence and calculate how far behind we are.
 /// Returns (osm_sequence, sequences_behind) - both None if fetch fails.
 async fn fetch_osm_replication_state(local_sequence: u64) -> (Option<u64>, Option<i64>) {
-    const OSM_STATE_URL: &str = "https://planet.openstreetmap.org/replication/changesets/state.yaml";
+    const OSM_STATE_URL: &str =
+        "https://planet.openstreetmap.org/replication/changesets/state.yaml";
     const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-    let client = reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        .build();
+    let client = reqwest::Client::builder().timeout(TIMEOUT).build();
 
     let Ok(client) = client else {
         tracing::warn!("Failed to create HTTP client for OSM state fetch");
