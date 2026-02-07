@@ -32,7 +32,7 @@ services:
     volumes:
       - ${DATA_PATH:-./data}:/data
     environment:
-      - DATA_PATH=/Users/mvexel/data/changesets
+      - DATA_PATH=/data
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-60}
       - MAX_SEQUENCES_PER_RUN=${MAX_SEQUENCES_PER_RUN:-1000}
