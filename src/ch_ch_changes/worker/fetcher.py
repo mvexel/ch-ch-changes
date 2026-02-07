@@ -189,10 +189,10 @@ async def fetch_sequence_async(
         _fetch_with_retry_async(url, client), _fetch_with_retry_async(state_url, client)
     )
 
-    # Decompress OSM data
+    # Decompress OSM data (gzip.decompress works on bytes directly)
     xml_path = tmp_dir / f"{sequence}.osm"
-    with gzip.open(osm_resp.content, "rb") as f_in:
-        xml_path.write_bytes(f_in.read())
+    xml_data = gzip.decompress(osm_resp.content)
+    xml_path.write_bytes(xml_data)
 
     # Parse state
     state = {}
