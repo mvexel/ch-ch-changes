@@ -119,6 +119,93 @@ def _bootstrap_from_parquet(data_path: Path) -> int | None:
     return None
 
 
+def _smart_backfill_sequence(data_path: Path, current_sequence: int) -> int | None:
+    """Estimate starting sequence based on base layer cutoff timestamp.
+
+    If base layer exists but has no replication_sequence values (planet dump),
+    estimate the sequence to start backfill from based on the latest timestamp
+    in the base layer.
+
+    Returns None if:
+    - No base layer found
+    - Base layer is > 30 days stale (user should reload)
+
+    Otherwise returns estimated sequence with 12-hour safety buffer.
+    """
+    import duckdb
+    from datetime import datetime, timedelta, timezone
+
+    base_dir = data_path / "base"
+    if not base_dir.exists() or not any(base_dir.rglob("*.parquet")):
+        return None
+
+    try:
+        conn = duckdb.connect(":memory:")
+        # Query latest timestamp (prefer closed_at, fallback to created_at)
+        sql = f"""
+            SELECT
+                COALESCE(MAX(closed_at), MAX(created_at)) as latest_timestamp
+            FROM read_parquet('{base_dir}/**/*.parquet', hive_partitioning=true)
+        """
+        row = conn.execute(sql).fetchone()
+        conn.close()
+
+        if not row or row[0] is None:
+            return None
+
+        # Convert to datetime (DuckDB returns datetime or timestamp)
+        base_cutoff = row[0]
+        if isinstance(base_cutoff, int):
+            # Milliseconds since epoch
+            base_cutoff = datetime.fromtimestamp(base_cutoff / 1000, tz=timezone.utc)
+        elif not isinstance(base_cutoff, datetime):
+            # String timestamp
+            base_cutoff = datetime.fromisoformat(str(base_cutoff).replace("Z", "+00:00"))
+        elif base_cutoff.tzinfo is None:
+            base_cutoff = base_cutoff.replace(tzinfo=timezone.utc)
+
+        now = datetime.now(timezone.utc)
+        age_days = (now - base_cutoff).total_seconds() / 86400
+
+        # Refuse to backfill if base is too stale
+        if age_days > 30:
+            logger.error(
+                "Base layer is %.1f days old (cutoff: %s). "
+                "Data is too stale for backfill. Please reload from fresh planet dump.",
+                age_days,
+                base_cutoff.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            )
+            raise SystemExit(
+                f"Base layer too stale ({age_days:.1f} days). "
+                "Download fresh planet dump and reload."
+            )
+
+        # Estimate sequence with safety buffer
+        delta_minutes = (now - base_cutoff).total_seconds() / 60
+        buffer_minutes = 720  # 12 hours
+        # Estimate 1.2 sequences per minute (accounts for gaps)
+        estimated_gap = int((delta_minutes + buffer_minutes) * 1.2)
+        estimated_sequence = max(0, current_sequence - estimated_gap)
+
+        logger.info(
+            "Smart backfill: base cutoff %s (%.1f days ago), "
+            "estimated start sequence %d (current: %d, backfilling ~%d sequences)",
+            base_cutoff.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            age_days,
+            estimated_sequence,
+            current_sequence,
+            current_sequence - estimated_sequence,
+        )
+
+        return estimated_sequence
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        logger.warning("Smart backfill estimation failed: %s", e)
+        return None
+
+
 def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
     """Main replication loop."""
     delta_dir = config.get_delta_dir()
@@ -139,14 +226,22 @@ def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
         local_sequence = args.start_sequence
         logger.info("Starting from explicit sequence: %d", local_sequence)
     elif not args.no_bootstrap:
+        # Try to bootstrap from existing replication_sequence values
         bootstrapped = _bootstrap_from_parquet(Path(config.DATA_PATH))
         if bootstrapped is not None:
             local_sequence = bootstrapped
-            logger.info("Bootstrapped from parquet: sequence %d", local_sequence)
+            logger.info("Bootstrapped from parquet replication_sequence: %d", local_sequence)
         else:
+            # No replication_sequence found, try smart backfill from base timestamp
             remote = fetch_state(base_url)
-            local_sequence = remote["sequence"]
-            logger.info("Starting from remote latest: sequence %d", local_sequence)
+            remote_sequence = remote["sequence"]
+            smart_start = _smart_backfill_sequence(Path(config.DATA_PATH), remote_sequence)
+            if smart_start is not None:
+                local_sequence = smart_start
+            else:
+                # No base layer or estimation failed, start from current
+                local_sequence = remote_sequence
+                logger.info("Starting from remote latest: sequence %d", local_sequence)
     else:
         remote = fetch_state(base_url)
         local_sequence = remote["sequence"]
