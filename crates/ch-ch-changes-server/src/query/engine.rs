@@ -84,13 +84,16 @@ impl QueryEngine {
     /// Helper to get the glob patterns for all parquet files
     /// Returns patterns for both base and delta directories if they exist,
     /// or falls back to a recursive search.
+    /// Excludes index files (in base/indexes/) to avoid partition mismatches.
     fn get_glob_patterns(&self) -> Vec<String> {
         let base = self.data_path.join("base");
         let delta = self.data_path.join("delta");
 
         let mut globs = Vec::new();
         if base.exists() {
-            globs.push(base.join("**/*.parquet").to_string_lossy().to_string());
+            // Use year=*/month=*/*.parquet to only match partitioned data files
+            // This excludes base/indexes/*.parquet which aren't partitioned
+            globs.push(base.join("year=*/month=*/*.parquet").to_string_lossy().to_string());
         }
         if delta.exists() {
             globs.push(delta.join("**/*.parquet").to_string_lossy().to_string());

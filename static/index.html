@@ -103,8 +103,16 @@ https://{{.Host}}/changesets/date/from/20240115/to/20240116.json
 https://{{.Host}}/changesets/date/from/20240115/to/20240116.jsonl</code></pre>
     <p><strong>Note:</strong> Date ranges are limited to 1 day maximum (e.g., consecutive dates only). For larger ranges, make multiple requests.</p>
 
-    <p><span class="endpoint">GET /meta/state</span> - Replication state info</p>
+    <p><span class="endpoint">GET /meta/state</span> - Dataset statistics and replication status</p>
     <pre><code>https://{{.Host}}/meta/state</code></pre>
+    <p>Returns comprehensive dataset information including:</p>
+    <ul>
+        <li>Local replication sequence and time since last update</li>
+        <li>Changeset ID range (earliest/latest)</li>
+        <li>Total changeset count (approximate, may include duplicates between base/delta layers)</li>
+        <li>OSM server's current sequence and how far behind we are</li>
+    </ul>
+    <p>Use this endpoint to monitor data freshness and detect replication issues. If <code>sequences_behind</code> is consistently high or <code>seconds_since_update</code> is large, the replication worker may be down.</p>
 
     <p><span class="endpoint">GET /auth/me</span> - Account limits &amp; usage 🔐</p>
     <pre><code>https://{{.Host}}/auth/me</code></pre>
