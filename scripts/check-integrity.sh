@@ -16,13 +16,17 @@ echo ""
 
 # Check if DuckDB CLI is available
 if ! command -v duckdb &> /dev/null; then
-    echo -e "${YELLOW}Warning: duckdb CLI not found. Installing...${NC}"
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        brew install duckdb
-    else
-        echo -e "${RED}Please install DuckDB CLI manually: https://duckdb.org/docs/installation${NC}"
-        exit 1
-    fi
+    echo -e "${RED}Error: duckdb CLI not found.${NC}"
+    echo ""
+    echo "Install it with:"
+    echo "  # Ubuntu/Debian"
+    echo "  wget https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-amd64.zip"
+    echo "  unzip duckdb_cli-linux-amd64.zip"
+    echo "  sudo mv duckdb /usr/local/bin/"
+    echo ""
+    echo "  # macOS"
+    echo "  brew install duckdb"
+    exit 1
 fi
 
 # Create temporary SQL script
@@ -73,14 +77,25 @@ ORDER BY check_type DESC, value1::BIGINT
 LIMIT 100;
 SQL
 
-# Replace placeholder with actual path
-sed -i.bak "s|\$DATA_PATH|$DATA_PATH|g" "$TEMP_SQL"
+# Replace placeholder with actual path (handle both macOS and Linux sed)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s|\$DATA_PATH|$DATA_PATH|g" "$TEMP_SQL"
+else
+    sed -i "s|\$DATA_PATH|$DATA_PATH|g" "$TEMP_SQL"
+fi
 
-echo -e "${YELLOW}Running integrity checks...${NC}"
+echo -e "${YELLOW}Running integrity checks (this may take a minute)...${NC}"
 echo ""
 
+# Debug: show the query
+if [[ "${DEBUG:-}" == "1" ]]; then
+    echo "Generated SQL:"
+    cat "$TEMP_SQL"
+    echo ""
+fi
+
 # Run the query
-RESULT=$(duckdb -csv -noheader "$TEMP_SQL" 2>&1)
+RESULT=$(duckdb -csv -noheader < "$TEMP_SQL" 2>&1)
 
 if [[ $? -ne 0 ]]; then
     echo -e "${RED}Error running integrity check:${NC}"
