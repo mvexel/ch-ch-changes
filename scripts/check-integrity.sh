@@ -77,28 +77,15 @@ ORDER BY check_type DESC, value1::BIGINT
 LIMIT 100;
 SQL
 
-# Replace placeholder with actual path (handle both macOS and Linux sed)
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "s|\$DATA_PATH|$DATA_PATH|g" "$TEMP_SQL"
-else
-    sed -i "s|\$DATA_PATH|$DATA_PATH|g" "$TEMP_SQL"
-fi
 
-echo -e "${YELLOW}Running integrity checks (this may take a minute)...${NC}"
 echo ""
 
-# Debug: show the query
-if [[ "${DEBUG:-}" == "1" ]]; then
-    echo "Generated SQL:"
-    cat "$TEMP_SQL"
-    echo ""
-fi
-
 # Run the query
+set +e  # Temporarily disable exit on error to capture output
 RESULT=$(duckdb -csv -noheader < "$TEMP_SQL" 2>&1)
+EXIT_CODE=$?
+set -e
 
-if [[ $? -ne 0 ]]; then
-    echo -e "${RED}Error running integrity check:${NC}"
     echo "$RESULT"
     exit 1
 fi
