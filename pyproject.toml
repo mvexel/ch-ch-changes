@@ -16,6 +16,7 @@ dependencies = [
     "httpx>=0.27",
     "pydantic-settings>=2",
     "pydantic>=2",
+    "osmium>=3.7.0",
 ]
 
 [project.optional-dependencies]

@@ -43,8 +43,8 @@ def test_partition_key_derivation(tmp_path):
     writer.write_changeset(cs_feb)
     writer.finish()
 
-    assert (tmp_path / "year=2024" / "month=01" / "data.parquet").exists()
-    assert (tmp_path / "year=2024" / "month=02" / "data.parquet").exists()
+    assert any((tmp_path / "year=2024" / "month=01").glob("*.parquet"))
+    assert any((tmp_path / "year=2024" / "month=02").glob("*.parquet"))
 
 
 def test_changesets_to_table_preserves_tags(sample_changesets):

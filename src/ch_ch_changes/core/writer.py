@@ -22,31 +22,35 @@ class PartitionedWriter:
     def __init__(self, output_dir: str | Path, batch_size: int = 10000):
         self.output_dir = Path(output_dir)
         self.batch_size = batch_size
-        self._buffers: dict[tuple[int, int], list[Changeset]] = {}
+        self._buffers: dict[tuple[int, int], list[Changeset | dict[str, Any]]] = {}
         self._counts: dict[tuple[int, int], int] = {}
+        self._file_counts: dict[tuple[int, int], int] = {}
         self._written_files: list[Path] = []
 
     def write_changeset(self, cs: Changeset) -> None:
         key = self._partition_key(cs)
-        buf = self._buffers.setdefault(key, [])
-        buf.append(cs)
-        if len(buf) >= self.batch_size:
-            self._flush_partition(key)
+        self._buffers.setdefault(key, []).append(cs)
 
     def write_changesets(self, changesets: list[Changeset]) -> None:
         for cs in changesets:
             self.write_changeset(cs)
 
-    def finish(self) -> BatchStats:
-        """Flush all remaining data and return stats."""
+    def flush_all(self) -> None:
+        """Flush all partition buffers to disk immediately."""
         for key in list(self._buffers.keys()):
             if self._buffers[key]:
                 self._flush_partition(key)
+
+    def finish(self) -> BatchStats:
+        """Flush all remaining data and return stats."""
+        self.flush_all()
         return self._compute_stats()
 
-    def _partition_key(self, cs: Changeset) -> tuple[int, int]:
-        if cs.created_at is not None:
-            dt = datetime.fromtimestamp(cs.created_at / 1000, tz=timezone.utc)
+    def _partition_key(self, cs: Changeset | dict[str, Any]) -> tuple[int, int]:
+        created_at = cs.get("created_at") if isinstance(cs, dict) else cs.created_at
+        if created_at is not None:
+            # created_at is in milliseconds
+            dt = datetime.fromtimestamp(created_at / 1000, tz=timezone.utc)
             return (dt.year, dt.month)
         return (1970, 1)
 
@@ -58,13 +62,16 @@ class PartitionedWriter:
         year, month = key
         partition_dir = self.output_dir / f"year={year}" / f"month={month:02d}"
         partition_dir.mkdir(parents=True, exist_ok=True)
-        path = partition_dir / "data.parquet"
 
-        table = _changesets_to_table(changesets)
+        file_num = self._file_counts.get(key, 0)
+        path = partition_dir / f"part_{file_num:04d}.parquet"
+        self._file_counts[key] = file_num + 1
 
-        if path.exists():
-            existing = pq.read_table(path, schema=CHANGESET_SCHEMA)
-            table = pa.concat_tables([existing, table])
+        first = changesets[0]
+        if isinstance(first, dict):
+            table = pa.Table.from_pylist(changesets, schema=CHANGESET_SCHEMA)
+        else:
+            table = _changesets_to_table(changesets)
 
         pq.write_table(table, path, compression="snappy")
 

@@ -1,26 +1,20 @@
-"""CLI tool: convert OSM changeset XML to Parquet.
-
-NOTE: For large planet dump files (40GB+ XML), use the converter instead
-
-This Python converter is suitable for:
-- Small changeset XML files (< 1GB)
-- Ad-hoc conversions
-- Testing
-
-The converter is 5-10x faster and has lower memory usage for planet-scale data.
+"""
+CLI tool: convert OSM changeset XML to Parquet.
 """
 
 from __future__ import annotations
 
 import argparse
-import bz2
 import logging
+import shutil
+import subprocess
 import sys
+import osmium
 from pathlib import Path
 
 from ch_ch_changes.core.metadata import get_metadata_path, update_metadata_incremental
-from ch_ch_changes.core.parsing import parse_changesets
 from ch_ch_changes.core.writer import PartitionedWriter, write_flat
+from ch_ch_changes.converter.osmium_handler import ChangesetHandler
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +33,11 @@ def main():
         help='Input XML file (or .osm.bz2). Use "-" for stdin.',
     )
     parser.add_argument(
+        "--format",
+        "-f",
+        help="Force input format (e.g. osm, pbf). Required for stdin.",
+    )
+    parser.add_argument(
         "--output",
         "-o",
         help="Output Parquet file (single file mode)",
@@ -55,13 +54,8 @@ def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=10000,
+        default=100000,
         help="Records per write batch",
-    )
-    parser.add_argument(
-        "--continue-on-error",
-        action="store_true",
-        help="Save partial results on parse errors",
     )
 
     args = parser.parse_args()
@@ -76,27 +70,42 @@ def main():
         _convert_flat(args)
 
 
-def _open_input(input_path: str):
-    """Open input file, handling stdin and bz2 compression."""
-    if input_path == "-":
-        return sys.stdin.buffer
+def _get_input_file(input_arg: str, format_arg: str | None) -> tuple[str | osmium.io.File, subprocess.Popen | None]:
+    """Return (input object for osmium, optional subprocess to wait on).
 
-    path = Path(input_path)
-    if path.suffix == ".bz2" or path.name.endswith(".osm.bz2"):
-        return bz2.open(path, "rb")
+    For .bz2 inputs, attempts parallel decompression via lbzip2 or pbzip2
+    by passing the pipe fd directly to osmium via /dev/fd/N.
+    """
+    if input_arg != "-" and not format_arg and input_arg.endswith(".bz2"):
+        for cmd in ("lbzip2", "pbzip2"):
+            if shutil.which(cmd):
+                logger.info("Using %s for parallel bzip2 decompression", cmd)
+                proc = subprocess.Popen(
+                    [cmd, "-dc", input_arg],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                )
+                fd_path = f"/dev/fd/{proc.stdout.fileno()}"
+                return osmium.io.File(fd_path, "osm"), proc
 
-    return open(path, "rb")
+    if input_arg == "-" or format_arg:
+        fmt = format_arg or ("osm" if input_arg == "-" else "")
+        return osmium.io.File(input_arg, fmt), None
+    return input_arg, None
 
 
 def _convert_flat(args: argparse.Namespace) -> None:
     """Convert to a single flat Parquet file."""
     logger.info("Converting %s -> %s (flat)", args.input, args.output)
 
-    with _open_input(args.input) as f:
-        changesets = list(parse_changesets(f, continue_on_error=args.continue_on_error))
+    handler = ChangesetHandler()
+    input_file, proc = _get_input_file(args.input, args.format)
+    handler.apply_file(input_file)
+    if proc:
+        proc.wait()
 
-    logger.info("Parsed %d changesets, writing Parquet", len(changesets))
-    write_flat(changesets, args.output)
+    logger.info("Parsed %d changesets, writing Parquet", len(handler.buffer))
+    write_flat(handler.buffer, args.output)
     logger.info("Done: %s", args.output)
 
 
@@ -106,17 +115,33 @@ def _convert_partitioned(args: argparse.Namespace) -> None:
     logger.info("Converting %s -> %s (partitioned)", args.input, output_dir)
 
     writer = PartitionedWriter(output_dir, batch_size=args.batch_size)
-    count = 0
 
-    with _open_input(args.input) as f:
-        for cs in parse_changesets(f, continue_on_error=args.continue_on_error):
-            writer.write_changeset(cs)
-            count += 1
-            if count % 100_000 == 0:
-                logger.info("Processed %d changesets...", count)
+    class StreamingChangesetHandler(ChangesetHandler):
+        def __init__(self, writer: PartitionedWriter, batch_size: int):
+            super().__init__()
+            self.writer = writer
+            self.limit = batch_size
+
+        def changeset(self, c):
+            super().changeset(c)
+            if len(self.buffer) >= self.limit:
+                logger.info("Buffered %d changesets; flushing...", len(self.buffer))
+                self.writer.write_changesets(self.buffer)
+                self.writer.flush_all()
+                self.clear_buffer()
+
+    stream_handler = StreamingChangesetHandler(writer, args.batch_size)
+    input_file, proc = _get_input_file(args.input, args.format)
+    stream_handler.apply_file(input_file)
+    if proc:
+        proc.wait()
+    
+    # Flush remaining
+    if stream_handler.buffer:
+        writer.write_changesets(stream_handler.buffer)
 
     stats = writer.finish()
-    logger.info("Wrote %d changesets to %s", count, output_dir)
+    logger.info("Wrote total changesets to %s", output_dir)
 
     # Update metadata
     metadata_path = get_metadata_path(output_dir)

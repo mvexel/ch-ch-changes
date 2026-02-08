@@ -82,7 +82,12 @@ This API provides the metadata only.
 The system consists of three components:
 
 ### 1. Converter (`changeset-to-parquet`)
-TODO
+### 1. Converter (`changeset-to-parquet`)
+A high-performance Python tool using `pyosmium` to convert OSM XML/OSC files into partitioned Parquet datasets.
+
+```bash
+uv run chch-convert-py -i planet-changesets.osm.bz2 -o /data/base --partition
+```
 
 ### 2. Server (`chch-server`)
 FastAPI (Python) server that queries Parquet files using DuckDB.
@@ -176,7 +181,8 @@ See detailed deployment guides:
 # Download latest planet changeset dump
 wget https://planet.openstreetmap.org/planet/changesets-latest.osm.bz2
 
-TODO write tool
+# Convert to Parquet (partitioned)
+uv run chch-convert-py -i changesets-latest.osm.bz2 --output-dir data/base --partition
 
 **Step 2: Start server and worker (Python)**
 
