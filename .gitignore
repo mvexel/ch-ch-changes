@@ -1,22 +1,7 @@
-/target
 _local/
-
-# Local configuration files (copy from .example files)
-Caddyfile
-hetzner-config.env
-
 .DS_Store
 *.osm
-
-results/
-
 .env.local
 prod.env
-
-data/
-
-# sqlite auth db if stored here..
-*.db*
-
-
-.zed/
+__pycache__/
+results/
