@@ -21,10 +21,6 @@ data/
 
 .zed/
 
-# Rust (converter only)
-rust-converter/target/
-rust-converter/Cargo.lock
-
 # Python (server + worker)
 __pycache__/
 *.py[cod]

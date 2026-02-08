@@ -1,14 +1,13 @@
 """CLI tool: convert OSM changeset XML to Parquet.
 
-NOTE: For large planet dump files (40GB+ XML), use the Rust converter instead:
-    cargo run --release --bin chch-convert -- --input changesets-latest.osm.bz2 --output-dir /data/base --partition
+NOTE: For large planet dump files (40GB+ XML), use the converter instead
 
 This Python converter is suitable for:
 - Small changeset XML files (< 1GB)
 - Ad-hoc conversions
 - Testing
 
-The Rust converter is 5-10x faster and has lower memory usage for planet-scale data.
+The converter is 5-10x faster and has lower memory usage for planet-scale data.
 """
 
 from __future__ import annotations

@@ -53,33 +53,8 @@ pip install --upgrade pip
 pip install "$REPO_DIR/dist/"*.whl
 echo -e "${GREEN}✓ Installed Python package${NC}"
 
-# Step 5: Build Rust converter (for initial planet dump loads)
-echo -e "\n${YELLOW}[5/9] Building Rust converter...${NC}"
-if [ -d "$REPO_DIR/rust-converter" ]; then
-    # Ensure cargo is available
-    if ! command -v cargo &> /dev/null; then
-        if [ -f "$HOME/.cargo/env" ]; then
-            source "$HOME/.cargo/env"
-        else
-            echo -e "${YELLOW}Warning: cargo not found, skipping converter build${NC}"
-        fi
-    fi
-
-    if command -v cargo &> /dev/null; then
-        cd "$REPO_DIR/rust-converter"
-        cargo build --release
-        mkdir -p "$DEPLOY_DIR/bin"
-        cp target/release/chch-convert "$DEPLOY_DIR/bin/"
-        chmod +x "$DEPLOY_DIR/bin/chch-convert"
-        echo -e "${GREEN}✓ Built Rust converter${NC}"
-    fi
-    cd "$REPO_DIR"
-else
-    echo -e "${YELLOW}No rust-converter directory found, skipping${NC}"
-fi
-
-echo -e "\n${YELLOW}[6/9] Stopping services...${NC}"
-sudo systemctl stop chch-server chch-worker
+# Step 5: Build converter (for initial planet dump loads)
+# TODO
 
 # Step 7: Update release tracking
 echo -e "\n${YELLOW}[7/9] Recording release...${NC}"
@@ -137,5 +112,5 @@ echo "  View logs:        journalctl -u chch-server -f"
 echo "                    journalctl -u chch-worker -f"
 echo "  Check status:     systemctl status chch-server chch-worker"
 echo "  Python shell:     $VENV_DIR/bin/python"
-echo "  Converter (Rust): $DEPLOY_DIR/bin/chch-convert"
+echo "  Converter:        $DEPLOY_DIR/bin/osm-changesets-to-parquet"
 echo "  List releases:    ls -lh $DEPLOY_DIR/releases/"

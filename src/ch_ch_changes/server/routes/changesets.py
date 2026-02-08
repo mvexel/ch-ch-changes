@@ -80,7 +80,7 @@ def _format_response(changesets: list, fmt: str | None, check_size: bool = True)
             media_type=CONTENT_TYPES["jsonl"],
         )
     else:
-        # Default to XML (matches Rust behavior)
+        # Default to XML
         return Response(
             content=format_xml(changesets),
             media_type=CONTENT_TYPES["xml"],
