@@ -1,21 +1,28 @@
+mod builder;
+mod indexing;
+mod models;
+mod parsing;
+mod schema;
+mod writer;
+
+use models::Changeset;
+
 use anyhow::{Context, Result};
 use bzip2::read::MultiBzDecoder;
-use ch_ch_changes_core::{
-    indexing::{write_metadata, IndexCollector},
-    models::PartitionSummary,
-    parsing::parse_xml_to_channel,
-    schema::create_schema,
-    writer::{consume_and_write_flat, consume_and_write_partitioned_parallel},
-};
 use clap::Parser;
+use indexing::{write_metadata, IndexCollector};
+use models::PartitionSummary;
+use parsing::parse_xml_to_channel;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
+use schema::create_schema;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::mpsc::sync_channel;
 use std::thread;
+use writer::{consume_and_write_flat, consume_and_write_partitioned_parallel};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -36,7 +43,7 @@ struct Args {
     #[arg(long, default_value_t = false)]
     partition: bool,
 
-    /// Generate index files (user_stats.parquet, open_changesets.parquet)
+    /// Generate index files (open_changesets.parquet)
     #[arg(long, default_value_t = false)]
     generate_indexes: bool,
 

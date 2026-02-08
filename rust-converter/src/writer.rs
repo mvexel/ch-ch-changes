@@ -1,5 +1,4 @@
 use crate::builder::BatchBuilders;
-#[cfg(feature = "indexing")]
 use crate::indexing::IndexCollector;
 use crate::models::{PartitionKey, PartitionStats, PartitionSummary};
 use crate::Changeset;
@@ -190,8 +189,7 @@ pub fn consume_and_write_flat(
     Ok(count)
 }
 
-/// Consumer: Writes partitioned parquet files (single or multi-threaded)
-#[cfg(feature = "indexing")]
+/// Consumer: Writes partitioned parquet files
 pub fn consume_and_write_partitioned_parallel(
     rx: Receiver<Result<Vec<Changeset>>>,
     output_dir: PathBuf,
@@ -208,34 +206,6 @@ pub fn consume_and_write_partitioned_parallel(
             if let Some(ref mut collector) = index_collector.as_deref_mut() {
                 collector.record(&cs)?;
             }
-            partitioned_writer.write_changeset(&cs)?;
-            count += 1;
-
-            if count % 1_000_000 == 0 {
-                println!("Processed {} changesets...", count);
-            }
-        }
-    }
-
-    let summary = partitioned_writer.finish()?;
-    Ok((count, summary))
-}
-
-/// Consumer: Writes partitioned parquet files (without indexing support)
-#[cfg(not(feature = "indexing"))]
-pub fn consume_and_write_partitioned_parallel(
-    rx: Receiver<Result<Vec<Changeset>>>,
-    output_dir: PathBuf,
-    schema: Arc<Schema>,
-    batch_size: usize,
-    _index_collector: Option<&mut ()>,
-) -> Result<(usize, PartitionSummary)> {
-    let mut partitioned_writer = PartitionedWriter::new(output_dir, schema, batch_size)?;
-    let mut count = 0;
-
-    for batch_result in rx {
-        let batch = batch_result?;
-        for cs in batch {
             partitioned_writer.write_changeset(&cs)?;
             count += 1;
 

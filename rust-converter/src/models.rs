@@ -1,6 +1,25 @@
-use crate::Changeset;
 use chrono::{Datelike, TimeZone, Utc};
 use std::collections::HashMap;
+
+/// Represents an OpenStreetMap changeset
+#[derive(Debug, Default, Clone)]
+pub struct Changeset {
+    pub id: i64,
+    pub replication_sequence: Option<u64>,
+    pub created_at: Option<i64>,
+    pub closed_at: Option<i64>,
+    pub open: bool,
+    pub user: Option<String>,
+    pub uid: Option<i64>,
+    pub min_lat: Option<f64>,
+    pub min_lon: Option<f64>,
+    pub max_lat: Option<f64>,
+    pub max_lon: Option<f64>,
+    pub num_changes: u32,
+    pub comments_count: u32,
+    pub description: Option<String>,
+    pub tags: HashMap<String, String>,
+}
 
 /// Partition key for year/month partitioning
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -98,14 +117,4 @@ impl PartitionSummary {
             self.stats.entry(key).or_default().merge(&stats);
         }
     }
-}
-
-/// Tracks user statistics for index generation
-#[derive(Debug, Default)]
-pub struct UserStats {
-    pub uid: i64,
-    pub username: Option<String>,
-    pub changeset_count: u64,
-    pub first_changeset_at: Option<i64>,
-    pub last_changeset_at: Option<i64>,
 }
