@@ -13,17 +13,20 @@ This API lets you query by entire days, hours, minutes, or ID ranges, and suppor
 ### With Docker (recommended)
 
 ```bash
-# Start server and worker
+# 1. Load initial data (required first!)
+./scripts/docker/init-data.sh
+
+# 2. Start server and worker
 docker-compose up -d
 
-# Check logs
+# 3. Check logs
 docker-compose logs -f
 
-# Access API
+# 4. Access API
 curl http://localhost:3000/health
 ```
 
-See [scripts/docker/README.md](scripts/docker/README.md) for full Docker deployment guide.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete deployment guide.
 
 ### Without Docker
 
@@ -33,6 +36,9 @@ Requires Python 3.11+
 # Install
 pip install -e .
 
+# Load initial data (required first!)
+./scripts/init-data.sh
+
 # Start server
 chch-server
 
@@ -40,7 +46,7 @@ chch-server
 chch-worker
 ```
 
-See [scripts/systemd/README.md](scripts/systemd/README.md) for native deployment guide.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for systemd deployment guide (advanced).
 
 ## API Examples
 

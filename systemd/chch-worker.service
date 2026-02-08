@@ -13,8 +13,8 @@ WorkingDirectory=/opt/chch
 # Environment variables
 EnvironmentFile=-/opt/chch/.env
 
-# Binary location
-ExecStart=/opt/chch/bin/chch-worker
+# Python application
+ExecStart=/opt/chch/venv/bin/chch-worker
 
 # Restart policy
 Restart=always

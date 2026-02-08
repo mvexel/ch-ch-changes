@@ -1,9 +1,10 @@
 FROM python:3.11-slim
 
-# Install system dependencies for lxml and DuckDB
+# Install system dependencies for lxml, DuckDB, and healthcheck
 RUN apt-get update && apt-get install -y \
     libxml2 \
     libxslt1.1 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
