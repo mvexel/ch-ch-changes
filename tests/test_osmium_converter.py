@@ -42,3 +42,39 @@ def test_handler_parses_changesets(tmp_path):
     assert c2["open"] is True
     assert c2["closed_at"] is None
     assert c2["min_lat"] is None  # No bounds in XML
+
+
+def test_handler_computes_duration_seconds(tmp_path):
+    """Test that handler computes duration_seconds for closed changesets."""
+    xml_file = tmp_path / "test.osm"
+    xml_file.write_text(SAMPLE_XML, encoding="utf-8")
+
+    handler = ChangesetHandler()
+    handler.apply_file(str(xml_file))
+
+    c1 = handler.buffer[0]
+    # Closed changeset with 1 hour duration
+    assert c1["duration_seconds"] is not None
+    assert c1["duration_seconds"] == 3600
+
+    c2 = handler.buffer[1]
+    # Open changeset should have None duration
+    assert c2["duration_seconds"] is None
+
+
+def test_handler_computes_bbox_area_km2(tmp_path):
+    """Test that handler computes bbox_area_km2 for changesets with bounds."""
+    xml_file = tmp_path / "test.osm"
+    xml_file.write_text(SAMPLE_XML, encoding="utf-8")
+
+    handler = ChangesetHandler()
+    handler.apply_file(str(xml_file))
+
+    c1 = handler.buffer[0]
+    # Changeset with bounds should have area
+    assert c1["bbox_area_km2"] is not None
+    assert c1["bbox_area_km2"] > 0
+
+    c2 = handler.buffer[1]
+    # Changeset without bounds should have None
+    assert c2["bbox_area_km2"] is None

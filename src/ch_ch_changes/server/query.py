@@ -17,14 +17,14 @@ from ch_ch_changes.models import Changeset, DatasetMetadata
 logger = logging.getLogger(__name__)
 
 ALLOWED_ORDER_COLUMNS = frozenset(
-    ["id", "created_at", "closed_at", "user", "uid", "num_changes", "comments_count", "open"]
+    ["id", "created_at", "closed_at", "user", "uid", "num_changes", "comments_count", "open", "duration_seconds", "bbox_area_km2"]
 )
 
 PARTITION_RESCAN_INTERVAL = 30  # seconds
 
 
 class QueryFilters:
-    __slots__ = ("username", "uid", "open", "limit", "offset", "order_by", "order_direction")
+    __slots__ = ("username", "uid", "open", "limit", "offset", "order_by", "order_direction", "min_duration_seconds", "max_duration_seconds", "min_bbox_area_km2", "max_bbox_area_km2")
 
     def __init__(
         self,
@@ -35,6 +35,10 @@ class QueryFilters:
         offset: Optional[int] = None,
         order_by: Optional[str] = None,
         order_direction: Optional[str] = None,
+        min_duration_seconds: Optional[int] = None,
+        max_duration_seconds: Optional[int] = None,
+        min_bbox_area_km2: Optional[float] = None,
+        max_bbox_area_km2: Optional[float] = None,
     ):
         self.username = username
         self.uid = uid
@@ -43,6 +47,10 @@ class QueryFilters:
         self.offset = offset
         self.order_by = order_by
         self.order_direction = order_direction
+        self.min_duration_seconds = min_duration_seconds
+        self.max_duration_seconds = max_duration_seconds
+        self.min_bbox_area_km2 = min_bbox_area_km2
+        self.max_bbox_area_km2 = max_bbox_area_km2
 
 
 class PartitionCount:
@@ -68,7 +76,7 @@ class QueryEngine:
         self._metadata_cache: Optional[DatasetMetadata] = None
         self._metadata_mtime: Optional[float] = None
 
-        # Partition cache (replaces standalone PartitionResolver)
+        # Partition cache
         self._partitions: dict[tuple[int, int], list[Path]] = {}
         self._partitions_last_scan: float = 0
         self._scan_partitions()
@@ -192,6 +200,14 @@ class QueryEngine:
             wheres.append(f"uid = {int(filters.uid)}")
         if filters.open is not None:
             wheres.append(f"open = {str(filters.open).lower()}")
+        if filters.min_duration_seconds is not None:
+            wheres.append(f"duration_seconds >= {int(filters.min_duration_seconds)}")
+        if filters.max_duration_seconds is not None:
+            wheres.append(f"duration_seconds <= {int(filters.max_duration_seconds)}")
+        if filters.min_bbox_area_km2 is not None:
+            wheres.append(f"bbox_area_km2 >= {float(filters.min_bbox_area_km2)}")
+        if filters.max_bbox_area_km2 is not None:
+            wheres.append(f"bbox_area_km2 <= {float(filters.max_bbox_area_km2)}")
 
         if wheres:
             parts.append("WHERE " + " AND ".join(wheres))
@@ -441,6 +457,8 @@ def _row_to_changeset(row: dict) -> Changeset:
         comments_count=int(row.get("comments_count", 0)),
         description=row.get("description"),
         tags=tags,
+        duration_seconds=row.get("duration_seconds"),
+        bbox_area_km2=row.get("bbox_area_km2"),
     )
 
 

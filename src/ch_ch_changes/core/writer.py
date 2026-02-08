@@ -152,6 +152,8 @@ def _changesets_to_table(changesets: list[Changeset]) -> pa.Table:
     comments_counts = []
     descriptions = []
     tags_list = []
+    duration_seconds_list = []
+    bbox_area_km2_list = []
 
     for cs in changesets:
         ids.append(cs.id)
@@ -169,6 +171,8 @@ def _changesets_to_table(changesets: list[Changeset]) -> pa.Table:
         comments_counts.append(cs.comments_count)
         descriptions.append(cs.description)
         tags_list.append(list(cs.tags.items()) if cs.tags else [])
+        duration_seconds_list.append(cs.duration_seconds)
+        bbox_area_km2_list.append(cs.bbox_area_km2)
 
     arrays = [
         pa.array(ids, type=pa.int64()),
@@ -186,6 +190,8 @@ def _changesets_to_table(changesets: list[Changeset]) -> pa.Table:
         pa.array(comments_counts, type=pa.uint32()),
         pa.array(descriptions, type=pa.utf8()),
         pa.array(tags_list, type=pa.map_(pa.utf8(), pa.utf8())),
+        pa.array(duration_seconds_list, type=pa.int64()),
+        pa.array(bbox_area_km2_list, type=pa.float64()),
     ]
 
     return pa.table(

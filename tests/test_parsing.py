@@ -115,3 +115,48 @@ def test_continue_on_error():
     ids = [cs.id for cs in result]
     assert 1 in ids
     assert 3 in ids
+
+
+def test_parse_computes_duration_seconds():
+    """Test that parsing computes duration_seconds for closed changesets."""
+    xml = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<osm>
+  <changeset id="123" created_at="2024-05-01T10:30:00Z" closed_at="2024-05-01T11:30:00Z"
+             open="false"/>
+</osm>
+"""
+    result = list(parse_changesets(io.BytesIO(xml)))
+    cs = result[0]
+    assert cs.duration_seconds is not None
+    # 1 hour = 3600 seconds
+    assert cs.duration_seconds == 3600
+
+
+def test_parse_computes_duration_none_for_open():
+    """Test that parsing returns None for duration_seconds on open changesets."""
+    xml = b'<osm><changeset id="99" created_at="2024-05-01T10:30:00Z" open="true"/></osm>'
+    result = list(parse_changesets(io.BytesIO(xml)))
+    assert result[0].duration_seconds is None
+
+
+def test_parse_computes_bbox_area_km2():
+    """Test that parsing computes bbox_area_km2 for changesets with bounds."""
+    xml = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<osm>
+  <changeset id="123" open="false"
+             min_lat="0.0" min_lon="0.0" max_lat="1.0" max_lon="1.0"/>
+</osm>
+"""
+    result = list(parse_changesets(io.BytesIO(xml)))
+    cs = result[0]
+    assert cs.bbox_area_km2 is not None
+    assert cs.bbox_area_km2 > 0
+
+
+def test_parse_computes_bbox_area_none_for_missing_bounds():
+    """Test that parsing returns None for bbox_area_km2 when bounds are missing."""
+    xml = b'<osm><changeset id="99" open="true"/></osm>'
+    result = list(parse_changesets(io.BytesIO(xml)))
+    assert result[0].bbox_area_km2 is None

@@ -8,6 +8,8 @@ from typing import Any
 
 import osmium
 
+from ch_ch_changes.core.computed import compute_bbox_area_km2, compute_duration_seconds
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,6 +32,11 @@ class ChangesetHandler(osmium.SimpleHandler):
         closed_ts = c.closed_at.timestamp() if c.closed_at else 0
         closed_at = closed_ts * 1000 if closed_ts > 0 else None
 
+        min_lat = c.bounds.bottom_left.lat if c.bounds.valid() else None
+        min_lon = c.bounds.bottom_left.lon if c.bounds.valid() else None
+        max_lat = c.bounds.top_right.lat if c.bounds.valid() else None
+        max_lon = c.bounds.top_right.lon if c.bounds.valid() else None
+
         record = {
             "id": c.id,
             "created_at": created_at,
@@ -37,16 +44,21 @@ class ChangesetHandler(osmium.SimpleHandler):
             "open": c.open,
             "user": c.user,
             "uid": c.uid,
-            "min_lat": c.bounds.bottom_left.lat if c.bounds.valid() else None,
-            "min_lon": c.bounds.bottom_left.lon if c.bounds.valid() else None,
-            "max_lat": c.bounds.top_right.lat if c.bounds.valid() else None,
-            "max_lon": c.bounds.top_right.lon if c.bounds.valid() else None,
+            "min_lat": min_lat,
+            "min_lon": min_lon,
+            "max_lat": max_lat,
+            "max_lon": max_lon,
             "num_changes": c.num_changes,
             "comments_count": 0,  # Not exposed in pyosmium Changeset object currently
             "replication_sequence": None,
             "description": tags.get("comment"),
             "tags": tags,
         }
+
+        # Compute derived fields
+        record["duration_seconds"] = compute_duration_seconds(created_at, closed_at, c.open)
+        record["bbox_area_km2"] = compute_bbox_area_km2(min_lat, min_lon, max_lat, max_lon)
+
         self.buffer.append(record)
 
     def clear_buffer(self):

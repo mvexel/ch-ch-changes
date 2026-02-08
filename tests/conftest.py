@@ -34,17 +34,19 @@ def tmp_data_dir(tmp_path):
             num_changes UINTEGER,
             comments_count UINTEGER,
             description VARCHAR,
-            tags MAP(VARCHAR, VARCHAR)
+            tags MAP(VARCHAR, VARCHAR),
+            duration_seconds BIGINT,
+            bbox_area_km2 DOUBLE
         )
     """)
     conn.execute("""
         INSERT INTO changesets VALUES
             (1, 100, TIMESTAMP '2024-05-01 00:00:00', TIMESTAMP '2024-05-01 01:00:00',
              false, 'alice', 10, 1.0, 2.0, 3.0, 4.0, 5, 6, 'first changeset',
-             MAP {'comment': 'first changeset', 'source': 'survey'}),
+             MAP {'comment': 'first changeset', 'source': 'survey'}, 3600, 248.58),
             (2, 110, TIMESTAMP '2024-05-02 12:00:00', NULL,
              true, 'bob', 20, 5.0, 6.0, 7.0, 8.0, 9, 0, 'second changeset',
-             MAP {'comment': 'second changeset'})
+             MAP {'comment': 'second changeset'}, NULL, 248.58)
     """)
     conn.execute(f"COPY changesets TO '{parquet_path}' (FORMAT PARQUET)")
     conn.close()
@@ -72,6 +74,8 @@ def sample_changesets():
             comments_count=6,
             description="first changeset",
             tags={"comment": "first changeset", "source": "survey"},
+            duration_seconds=3600,  # 1 hour
+            bbox_area_km2=248.58,  # Approximate area for 2 degree x 2 degree bbox
         ),
         Changeset(
             id=2,
@@ -89,6 +93,8 @@ def sample_changesets():
             comments_count=0,
             description="second changeset",
             tags={"comment": "second changeset"},
+            duration_seconds=None,  # Open changeset
+            bbox_area_km2=248.58,  # Approximate area for 2 degree x 2 degree bbox
         ),
     ]
 

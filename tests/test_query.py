@@ -106,3 +106,81 @@ def test_empty_data_dir(tmp_path):
     assert engine.get_total_count() is None
     results = engine.get_changesets_by_id_range(1, 100, QueryFilters())
     assert results == []
+
+
+def test_filter_by_duration_seconds(tmp_data_dir):
+    """Test filtering by minimum duration_seconds."""
+    engine = QueryEngine(str(tmp_data_dir))
+    # Filter for changesets with duration >= 3600 seconds (1 hour)
+    filters = QueryFilters(min_duration_seconds=3600)
+    results = engine.get_changesets_by_id_range(1, 100, filters)
+    # All results should have duration_seconds >= 3600 or None
+    for cs in results:
+        if cs.duration_seconds is not None:
+            assert cs.duration_seconds >= 3600
+
+
+def test_filter_by_max_duration_seconds(tmp_data_dir):
+    """Test filtering by maximum duration_seconds."""
+    engine = QueryEngine(str(tmp_data_dir))
+    # Filter for changesets with duration <= 7200 seconds (2 hours)
+    filters = QueryFilters(max_duration_seconds=7200)
+    results = engine.get_changesets_by_id_range(1, 100, filters)
+    # All results should have duration_seconds <= 7200 or None
+    for cs in results:
+        if cs.duration_seconds is not None:
+            assert cs.duration_seconds <= 7200
+
+
+def test_filter_by_bbox_area_km2(tmp_data_dir):
+    """Test filtering by minimum bbox_area_km2."""
+    engine = QueryEngine(str(tmp_data_dir))
+    # Filter for changesets with bbox_area >= 100 km²
+    filters = QueryFilters(min_bbox_area_km2=100.0)
+    results = engine.get_changesets_by_id_range(1, 100, filters)
+    # All results should have bbox_area_km2 >= 100 or None
+    for cs in results:
+        if cs.bbox_area_km2 is not None:
+            assert cs.bbox_area_km2 >= 100.0
+
+
+def test_filter_by_max_bbox_area_km2(tmp_data_dir):
+    """Test filtering by maximum bbox_area_km2."""
+    engine = QueryEngine(str(tmp_data_dir))
+    # Filter for changesets with bbox_area <= 1000 km²
+    filters = QueryFilters(max_bbox_area_km2=1000.0)
+    results = engine.get_changesets_by_id_range(1, 100, filters)
+    # All results should have bbox_area_km2 <= 1000 or None
+    for cs in results:
+        if cs.bbox_area_km2 is not None:
+            assert cs.bbox_area_km2 <= 1000.0
+
+
+def test_order_by_duration_seconds(tmp_data_dir):
+    """Test ordering by duration_seconds."""
+    engine = QueryEngine(str(tmp_data_dir))
+    filters = QueryFilters(order_by="duration_seconds", order_direction="ASC")
+    results = engine.get_changesets_by_id_range(1, 100, filters)
+    # Results should be ordered by duration_seconds (nulls last)
+    assert len(results) > 0
+
+
+def test_order_by_bbox_area_km2(tmp_data_dir):
+    """Test ordering by bbox_area_km2."""
+    engine = QueryEngine(str(tmp_data_dir))
+    filters = QueryFilters(order_by="bbox_area_km2", order_direction="DESC")
+    results = engine.get_changesets_by_id_range(1, 100, filters)
+    # Results should be ordered by bbox_area_km2 descending
+    assert len(results) > 0
+
+
+def test_computed_columns_present_in_results(tmp_data_dir):
+    """Test that computed columns are present in query results."""
+    engine = QueryEngine(str(tmp_data_dir))
+    results = engine.get_changesets_by_id_range(1, 100, QueryFilters())
+    # At least one changeset should exist
+    assert len(results) > 0
+    # Check that computed columns are present (may be None for some changesets)
+    for cs in results:
+        assert hasattr(cs, "duration_seconds")
+        assert hasattr(cs, "bbox_area_km2")

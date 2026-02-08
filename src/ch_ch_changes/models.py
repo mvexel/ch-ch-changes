@@ -29,6 +29,9 @@ class Changeset:
     comments_count: int = 0
     description: Optional[str] = None
     tags: dict[str, str] = field(default_factory=dict)
+    # Computed fields
+    duration_seconds: Optional[int] = None
+    bbox_area_km2: Optional[float] = None
 
 
 @dataclass

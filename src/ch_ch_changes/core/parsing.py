@@ -9,6 +9,7 @@ from typing import IO, Union
 
 from lxml import etree
 
+from ch_ch_changes.core.computed import compute_bbox_area_km2, compute_duration_seconds
 from ch_ch_changes.models import Changeset
 
 logger = logging.getLogger(__name__)
@@ -104,5 +105,9 @@ def _parse_element(elem: etree._Element) -> Changeset:
         cs.tags[k] = v
         if k == "comment":
             cs.description = v
+
+    # Compute derived fields
+    cs.duration_seconds = compute_duration_seconds(cs.created_at, cs.closed_at, cs.open)
+    cs.bbox_area_km2 = compute_bbox_area_km2(cs.min_lat, cs.min_lon, cs.max_lat, cs.max_lon)
 
     return cs

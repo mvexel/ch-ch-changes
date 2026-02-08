@@ -70,3 +70,56 @@ def test_write_single_changeset(tmp_path):
     table = pq.read_table(output)
     assert len(table) == 1
     assert table.column("id").to_pylist() == [42]
+
+
+def test_schema_includes_computed_columns():
+    """Test that the schema includes computed columns."""
+    assert "duration_seconds" in CHANGESET_SCHEMA.names
+    assert "bbox_area_km2" in CHANGESET_SCHEMA.names
+
+
+def test_write_preserves_computed_columns(tmp_path):
+    """Test that computed columns are written to Parquet."""
+    cs = Changeset(
+        id=42,
+        created_at=1714521600000,
+        closed_at=1714525200000,  # 1 hour later
+        open=False,
+        min_lat=0.0,
+        min_lon=0.0,
+        max_lat=1.0,
+        max_lon=1.0,
+        num_changes=1,
+        comments_count=0,
+        tags={},
+        duration_seconds=3600,
+        bbox_area_km2=12345.67,
+    )
+    output = tmp_path / "computed.parquet"
+    write_flat([cs], output)
+
+    table = pq.read_table(output)
+    assert "duration_seconds" in table.schema.names
+    assert "bbox_area_km2" in table.schema.names
+    assert table.column("duration_seconds").to_pylist() == [3600]
+    assert table.column("bbox_area_km2").to_pylist() == [12345.67]
+
+
+def test_write_handles_null_computed_columns(tmp_path):
+    """Test that null computed columns are handled correctly."""
+    cs = Changeset(
+        id=42,
+        created_at=1714521600000,
+        open=True,  # Open, so duration should be None
+        num_changes=1,
+        comments_count=0,
+        tags={},
+        duration_seconds=None,
+        bbox_area_km2=None,
+    )
+    output = tmp_path / "null_computed.parquet"
+    write_flat([cs], output)
+
+    table = pq.read_table(output)
+    assert table.column("duration_seconds").to_pylist() == [None]
+    assert table.column("bbox_area_km2").to_pylist() == [None]

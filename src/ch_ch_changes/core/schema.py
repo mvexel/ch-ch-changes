@@ -23,5 +23,8 @@ CHANGESET_SCHEMA = pa.schema(
             pa.map_(pa.utf8(), pa.utf8()),
             nullable=False,
         ),
+        # Computed fields
+        pa.field("duration_seconds", pa.int64(), nullable=True),
+        pa.field("bbox_area_km2", pa.float64(), nullable=True),
     ]
 )
