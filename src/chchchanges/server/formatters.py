@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ch_ch_changes.models import Changeset
+from chchchanges.models import Changeset
 
 API_VERSION = "0.6"
 GENERATOR = "ch-ch-changes"

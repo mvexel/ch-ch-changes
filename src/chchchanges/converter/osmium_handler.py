@@ -1,6 +1,7 @@
 """
 PyOsmium handler for parsing OSM changesets.
 """
+
 from __future__ import annotations
 
 import logging
@@ -8,7 +9,7 @@ from typing import Any
 
 import osmium
 
-from ch_ch_changes.core.computed import compute_bbox_area_km2, compute_duration_seconds
+from chchchanges.core.computed import compute_bbox_area_km2, compute_duration_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +24,12 @@ class ChangesetHandler(osmium.SimpleHandler):
     def changeset(self, c: osmium.osm.Changeset):
         """Process a single changeset."""
         tags = {t.k: t.v for t in c.tags}
-        
+
         # Helper to safely get timestamps (they can be None in some edge cases or closed_at not set)
         # pyosmium returns epoch (1970-01-01) for missing timestamps
         created_ts = c.created_at.timestamp() if c.created_at else 0
         created_at = created_ts * 1000 if created_ts > 0 else None
-        
+
         closed_ts = c.closed_at.timestamp() if c.closed_at else 0
         closed_at = closed_ts * 1000 if closed_ts > 0 else None
 

@@ -8,13 +8,13 @@ import argparse
 import logging
 import shutil
 import subprocess
-import sys
-import osmium
 from pathlib import Path
 
-from ch_ch_changes.core.metadata import get_metadata_path, update_metadata_incremental
-from ch_ch_changes.core.writer import PartitionedWriter, write_flat
-from ch_ch_changes.converter.osmium_handler import ChangesetHandler
+import osmium
+
+from chchchanges.converter.osmium_handler import ChangesetHandler
+from chchchanges.core.metadata import get_metadata_path, update_metadata_incremental
+from chchchanges.core.writer import PartitionedWriter, write_flat
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,9 @@ def main():
         _convert_flat(args)
 
 
-def _get_input_file(input_arg: str, format_arg: str | None) -> tuple[str | osmium.io.File, subprocess.Popen | None]:
+def _get_input_file(
+    input_arg: str, format_arg: str | None
+) -> tuple[str | osmium.io.File, subprocess.Popen | None]:
     """Return (input object for osmium, optional subprocess to wait on).
 
     For .bz2 inputs, attempts parallel decompression via lbzip2 or pbzip2
@@ -135,7 +137,7 @@ def _convert_partitioned(args: argparse.Namespace) -> None:
     stream_handler.apply_file(input_file)
     if proc:
         proc.wait()
-    
+
     # Flush remaining
     if stream_handler.buffer:
         writer.write_changesets(stream_handler.buffer)

@@ -39,6 +39,7 @@ tests/
 
 # Documentation
 *.md
+!README.md
 loadtest/
 extra/
 static/

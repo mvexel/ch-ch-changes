@@ -5,9 +5,9 @@ from __future__ import annotations
 import duckdb
 import pytest
 
-from ch_ch_changes.config import ServerConfig
-from ch_ch_changes.models import Changeset
-from ch_ch_changes.server.app import create_app
+from chchchanges.config import ServerConfig
+from chchchanges.models import Changeset
+from chchchanges.server.app import create_app
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_app(tmp_data_dir):
     # Manually trigger startup
     import time
 
-    from ch_ch_changes.server.query import QueryEngine
+    from chchchanges.server.query import QueryEngine
 
     app.state.engine = QueryEngine(str(tmp_data_dir))
     app.state.started_at = time.time()

@@ -1,8 +1,8 @@
 """Tests for worker components."""
 
-from ch_ch_changes.models import Changeset
-from ch_ch_changes.worker.fetcher import sequence_to_path
-from ch_ch_changes.worker.main import HourlyBatch
+from chchchanges.models import Changeset
+from chchchanges.worker.fetcher import sequence_to_path
+from chchchanges.worker.main import HourlyBatch
 
 
 def test_sequence_to_path():

@@ -9,13 +9,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
-from ch_ch_changes.server.formatters import (
+from chchchanges.server.formatters import (
     CONTENT_TYPES,
     format_json,
     format_jsonl,
     format_xml,
 )
-from ch_ch_changes.server.query import QueryFilters
+from chchchanges.server.query import QueryFilters
 
 logger = logging.getLogger(__name__)
 

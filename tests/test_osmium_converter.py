@@ -1,7 +1,4 @@
-
-from pathlib import Path
-from ch_ch_changes.converter.osmium_handler import ChangesetHandler
-from ch_ch_changes.models import Changeset, BatchStats
+from chchchanges.converter.osmium_handler import ChangesetHandler
 
 # Small sample OSM XML for testing
 SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -16,6 +13,7 @@ SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </osm>
 """
 
+
 def test_handler_parses_changesets(tmp_path):
     xml_file = tmp_path / "test.osm"
     xml_file.write_text(SAMPLE_XML, encoding="utf-8")
@@ -24,7 +22,7 @@ def test_handler_parses_changesets(tmp_path):
     handler.apply_file(str(xml_file))
 
     assert len(handler.buffer) == 2
-    
+
     c1 = handler.buffer[0]
     assert c1["id"] == 1
     assert c1["user"] == "mapper"

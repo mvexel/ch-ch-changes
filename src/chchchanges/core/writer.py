@@ -10,8 +10,8 @@ from typing import Optional
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from ch_ch_changes.core.schema import CHANGESET_SCHEMA
-from ch_ch_changes.models import BatchStats, Changeset
+from chchchanges.core.schema import CHANGESET_SCHEMA
+from chchchanges.models import BatchStats, Changeset
 
 logger = logging.getLogger(__name__)
 

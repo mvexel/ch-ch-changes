@@ -2,9 +2,9 @@
 
 import pyarrow.parquet as pq
 
-from ch_ch_changes.core.schema import CHANGESET_SCHEMA
-from ch_ch_changes.core.writer import PartitionedWriter, _changesets_to_table, write_flat
-from ch_ch_changes.models import Changeset
+from chchchanges.core.schema import CHANGESET_SCHEMA
+from chchchanges.core.writer import PartitionedWriter, _changesets_to_table, write_flat
+from chchchanges.models import Changeset
 
 
 def test_write_flat(tmp_path, sample_changesets):

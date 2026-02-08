@@ -10,13 +10,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ch_ch_changes.config import WorkerConfig
-from ch_ch_changes.core.metadata import get_metadata_path, update_metadata_incremental
-from ch_ch_changes.core.parsing import parse_changesets
-from ch_ch_changes.core.writer import write_partitioned
-from ch_ch_changes.models import Changeset
-from ch_ch_changes.worker.compaction import compact_old_deltas
-from ch_ch_changes.worker.fetcher import fetch_sequences_parallel, fetch_state
+from chchchanges.config import WorkerConfig
+from chchchanges.core.metadata import get_metadata_path, update_metadata_incremental
+from chchchanges.core.parsing import parse_changesets
+from chchchanges.core.writer import write_partitioned
+from chchchanges.models import Changeset
+from chchchanges.worker.compaction import compact_old_deltas
+from chchchanges.worker.fetcher import fetch_sequences_parallel, fetch_state
 
 logger = logging.getLogger(__name__)
 
@@ -133,8 +133,9 @@ def _smart_backfill_sequence(data_path: Path, current_sequence: int) -> int | No
 
     Otherwise returns estimated sequence with 12-hour safety buffer.
     """
+    from datetime import datetime, timezone
+
     import duckdb
-    from datetime import datetime, timedelta, timezone
 
     base_dir = data_path / "base"
     if not base_dir.exists() or not any(base_dir.rglob("*.parquet")):
@@ -308,7 +309,9 @@ def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
                         cs.replication_sequence = seq
 
                     # Get timestamp from state
-                    seq_timestamp = seq_state.get("last_run", datetime.now(timezone.utc).isoformat())
+                    seq_timestamp = seq_state.get(
+                        "last_run", datetime.now(timezone.utc).isoformat()
+                    )
 
                     if batch is not None:
                         # Hourly batching mode

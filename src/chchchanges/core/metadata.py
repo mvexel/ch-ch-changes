@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ch_ch_changes.models import BatchStats, DatasetMetadata, PartitionMetadata
+from chchchanges.models import BatchStats, DatasetMetadata, PartitionMetadata
 
 logger = logging.getLogger(__name__)
 

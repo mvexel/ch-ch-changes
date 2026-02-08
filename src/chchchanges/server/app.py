@@ -12,9 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from ch_ch_changes.config import ServerConfig
-from ch_ch_changes.server.query import QueryEngine
-from ch_ch_changes.server.routes import auth, changesets, meta
+from chchchanges.config import ServerConfig
+from chchchanges.server.query import QueryEngine
+from chchchanges.server.routes import auth, changesets, meta
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +26,14 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        logger.info("Starting ch-ch-changes server, data_path=%s", config.DATA_PATH)
+        logger.info("Starting chchchanges server, data_path=%s", config.DATA_PATH)
         app.state.engine = QueryEngine(config.DATA_PATH)
         app.state.started_at = time.time()
         app.state.config = config
         yield
 
     app = FastAPI(
-        title="ch-ch-changes",
+        title="chchchanges",
         description="OSM Changeset API backed by DuckDB/Parquet",
         version="0.1.0",
         lifespan=lifespan,

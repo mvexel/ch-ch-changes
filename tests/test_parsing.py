@@ -2,7 +2,7 @@
 
 import io
 
-from ch_ch_changes.core.parsing import parse_changesets, parse_timestamp
+from chchchanges.core.parsing import parse_changesets, parse_timestamp
 
 VALID_XML = b"""\
 <?xml version="1.0" encoding="UTF-8"?>

@@ -9,8 +9,8 @@ from typing import IO, Union
 
 from lxml import etree
 
-from ch_ch_changes.core.computed import compute_bbox_area_km2, compute_duration_seconds
-from ch_ch_changes.models import Changeset
+from chchchanges.core.computed import compute_bbox_area_km2, compute_duration_seconds
+from chchchanges.models import Changeset
 
 logger = logging.getLogger(__name__)
 

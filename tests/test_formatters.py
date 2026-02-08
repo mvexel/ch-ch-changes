@@ -2,7 +2,7 @@
 
 import json
 
-from ch_ch_changes.server.formatters import format_json, format_jsonl, format_xml
+from chchchanges.server.formatters import format_json, format_jsonl, format_xml
 
 
 def test_json_format(sample_changesets):
@@ -33,7 +33,7 @@ def test_json_omits_none_fields(sample_changesets):
 
 def test_json_comment_tag_from_description():
     """If description exists but 'comment' not in tags, add it."""
-    from ch_ch_changes.models import Changeset
+    from chchchanges.models import Changeset
 
     cs = Changeset(id=1, open=True, description="my desc", tags={})
     result = format_json([cs])
@@ -43,7 +43,7 @@ def test_json_comment_tag_from_description():
 
 def test_json_empty_tags_omitted():
     """Empty tags dict should not appear in output."""
-    from ch_ch_changes.models import Changeset
+    from chchchanges.models import Changeset
 
     cs = Changeset(id=1, open=True, tags={})
     result = format_json([cs])
@@ -79,7 +79,7 @@ def test_xml_format(sample_changesets):
 
 
 def test_xml_escaping():
-    from ch_ch_changes.models import Changeset
+    from chchchanges.models import Changeset
 
     cs = Changeset(
         id=1,
@@ -93,7 +93,7 @@ def test_xml_escaping():
 
 
 def test_xml_self_closing_no_tags():
-    from ch_ch_changes.models import Changeset
+    from chchchanges.models import Changeset
 
     cs = Changeset(id=1, open=True, tags={})
     result = format_xml([cs])
@@ -102,7 +102,7 @@ def test_xml_self_closing_no_tags():
 
 
 def test_xml_comment_tag_from_description():
-    from ch_ch_changes.models import Changeset
+    from chchchanges.models import Changeset
 
     cs = Changeset(id=1, open=True, description="my desc", tags={"source": "bing"})
     result = format_xml([cs])

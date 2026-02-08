@@ -11,20 +11,43 @@ from typing import Optional
 
 import duckdb
 
-from ch_ch_changes.core.metadata import find_metadata_file, load_metadata
-from ch_ch_changes.models import Changeset, DatasetMetadata
+from chchchanges.core.metadata import find_metadata_file, load_metadata
+from chchchanges.models import Changeset, DatasetMetadata
 
 logger = logging.getLogger(__name__)
 
 ALLOWED_ORDER_COLUMNS = frozenset(
-    ["id", "created_at", "closed_at", "user", "uid", "num_changes", "comments_count", "open", "duration_seconds", "bbox_area_km2"]
+    [
+        "id",
+        "created_at",
+        "closed_at",
+        "user",
+        "uid",
+        "num_changes",
+        "comments_count",
+        "open",
+        "duration_seconds",
+        "bbox_area_km2",
+    ]
 )
 
 PARTITION_RESCAN_INTERVAL = 30  # seconds
 
 
 class QueryFilters:
-    __slots__ = ("username", "uid", "open", "limit", "offset", "order_by", "order_direction", "min_duration_seconds", "max_duration_seconds", "min_bbox_area_km2", "max_bbox_area_km2")
+    __slots__ = (
+        "username",
+        "uid",
+        "open",
+        "limit",
+        "offset",
+        "order_by",
+        "order_direction",
+        "min_duration_seconds",
+        "max_duration_seconds",
+        "min_bbox_area_km2",
+        "max_bbox_area_km2",
+    )
 
     def __init__(
         self,

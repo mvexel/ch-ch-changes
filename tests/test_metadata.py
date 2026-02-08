@@ -1,11 +1,11 @@
 """Tests for metadata management."""
 
-from ch_ch_changes.core.metadata import (
+from chchchanges.core.metadata import (
     _write_metadata_atomic,
     load_metadata,
     update_metadata_incremental,
 )
-from ch_ch_changes.models import BatchStats, DatasetMetadata, PartitionMetadata
+from chchchanges.models import BatchStats, DatasetMetadata, PartitionMetadata
 
 
 def test_load_nonexistent(tmp_path):

@@ -1,6 +1,6 @@
 """Tests for the query engine."""
 
-from ch_ch_changes.server.query import QueryEngine, QueryFilters
+from chchchanges.server.query import QueryEngine, QueryFilters
 
 
 def test_date_range_query(tmp_data_dir):
