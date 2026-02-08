@@ -33,8 +33,9 @@ else
 fi
 
 echo -e "\n${YELLOW}[2/8] Creating directory structure...${NC}"
-mkdir -p "$DEPLOY_DIR"/{bin,releases}
+mkdir -p "$DEPLOY_DIR"/{bin,releases,data}
 mkdir -p "$DATA_DIR"
+mkdir -p /var/lib/chch
 echo -e "${GREEN}✓ Created directories${NC}"
 
 ENV_FILE="$DEPLOY_DIR/.env"
@@ -52,7 +53,7 @@ AUTH_DB_PATH=/var/lib/chch/auth.db
 AUTH_DEFAULT_DAILY_LIMIT=0
 AUTH_DEFAULT_MONTHLY_LIMIT=0
 REQUIRE_AUTH=true
-DATA_PATH=/opt/chch/data/changesets
+DATA_PATH=/opt/chch/data
 
 # Replication worker
 POLL_INTERVAL_SECONDS=60
@@ -69,7 +70,7 @@ else
 fi
 
 echo -e "\n${YELLOW}[3/8] Setting permissions...${NC}"
-chown -R "$SERVICE_USER:$SERVICE_USER" "$DEPLOY_DIR" "$DATA_DIR"
+chown -R "$SERVICE_USER:$SERVICE_USER" "$DEPLOY_DIR" "$DATA_DIR" /var/lib/chch
 chmod 640 "$ENV_FILE"
 echo -e "${GREEN}✓ Set ownership to $SERVICE_USER${NC}"
 
@@ -83,11 +84,30 @@ echo -e "\n${YELLOW}[5/8] Making scripts executable...${NC}"
 chmod +x "$REPO_DIR/scripts"/*.sh
 echo -e "${GREEN}✓ Scripts are executable${NC}"
 
-echo -e "\n${YELLOW}[6/8] Installing Rust (if needed)...${NC}"
+echo -e "\n${YELLOW}[6/8] Checking Python installation...${NC}"
+if ! command -v python3 &> /dev/null; then
+    echo -e "${RED}Error: Python 3 not found${NC}"
+    echo "Please install Python 3.11 or higher"
+    exit 1
+fi
+
+PYTHON_VERSION=$(python3 --version | awk '{print $2}')
+echo "Python version: $PYTHON_VERSION"
+
+# Check Python version is 3.11+
+MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+if [ "$MAJOR" -lt 3 ] || ([ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 11 ]); then
+    echo -e "${RED}Error: Python 3.11+ required (found $PYTHON_VERSION)${NC}"
+    exit 1
+fi
+
+# Install Rust for the converter tool (optional but recommended)
+echo -e "\n${YELLOW}Installing Rust for converter (optional)...${NC}"
 if command -v cargo &> /dev/null; then
     echo "Rust already installed: $(cargo --version)"
 else
-    echo "Installing Rust..."
+    echo "Installing Rust for planet dump converter..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     source "$HOME/.cargo/env"
     echo -e "${GREEN}✓ Installed Rust${NC}"
@@ -95,26 +115,56 @@ fi
 
 echo -e "\n${YELLOW}[7/8] Building and deploying initial version...${NC}"
 cd "$REPO_DIR"
-sudo -u $(logname) "$REPO_DIR/scripts/deploy.sh" "initial"
 
-echo -e "\n${YELLOW}[8/8] Enabling services...${NC}"
+# Run deploy as the user who invoked sudo
+ACTUAL_USER=$(logname 2>/dev/null || echo "$SUDO_USER")
+if [ -n "$ACTUAL_USER" ]; then
+    sudo -u "$ACTUAL_USER" "$REPO_DIR/scripts/deploy.sh" "initial"
+else
+    echo -e "${YELLOW}Warning: Could not determine user, running deploy as root${NC}"
+    "$REPO_DIR/scripts/deploy.sh" "initial"
+fi
+
+echo -e "\n${YELLOW}[8/8] Configuring services...${NC}"
+# Stop services that were started by deploy.sh - they need data first
+systemctl stop chch-server chch-worker 2>/dev/null || true
+# Enable to start on boot (but don't start yet)
 systemctl enable chch-server
 systemctl enable chch-worker
-echo -e "${GREEN}✓ Services enabled to start on boot${NC}"
+echo -e "${GREEN}✓ Services configured (not started - waiting for data)${NC}"
 
 # Summary
 echo -e "\n${GREEN}=== Setup Complete ===${NC}"
 echo ""
-echo "Service status:"
-systemctl status chch-server chch-worker --no-pager -l || true
+echo -e "${YELLOW}⚠ IMPORTANT: Services are NOT running yet - they need data first!${NC}"
 echo ""
 echo "Next steps:"
-echo "  1. Copy your parquet files to: $DATA_DIR"
-echo "  2. Restart services: systemctl restart chch-server chch-worker"
-echo "  3. Check logs:"
-echo "     - Server: journalctl -u chch-server -f"
-echo "     - Worker: journalctl -u chch-worker -f"
-echo "  4. Test the API: curl http://localhost:3000/health"
+echo "  ${YELLOW}1. Load initial data (REQUIRED before starting services):${NC}"
+echo "     $REPO_DIR/scripts/init-data.sh"
+echo ""
+echo "     Alternative options:"
+echo "     # Use existing file:"
+echo "     $REPO_DIR/scripts/init-data.sh --input /path/to/changesets.osm.bz2"
+echo "     # Or copy existing parquet files:"
+echo "     sudo cp -r /path/to/data/* $DEPLOY_DIR/data/"
+echo ""
+echo "  ${YELLOW}2. Start services (ONLY after data is loaded):${NC}"
+echo "     sudo systemctl start chch-server chch-worker"
+echo ""
+echo "  3. Verify services are running:"
+echo "     sudo systemctl status chch-server chch-worker"
+echo ""
+echo "  4. Check logs:"
+echo "     journalctl -u chch-server -f"
+echo "     journalctl -u chch-worker -f"
+echo ""
+echo "  5. Test the API:"
+echo "     curl http://localhost:3000/health"
+echo "     curl 'http://localhost:3000/changesets?bbox=-180,-90,180,90&limit=10'"
+echo ""
+echo "Python environment:"
+echo "  Virtual env: $DEPLOY_DIR/venv"
+echo "  Activate:    source $DEPLOY_DIR/venv/bin/activate"
 echo ""
 echo "Optional - Set up monitoring:"
 echo "  # Add to crontab for health checks every 5 minutes"

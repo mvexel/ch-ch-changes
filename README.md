@@ -1,89 +1,36 @@
 # ch-ch-changes
 
-![bowie](https://chch.osm.lol/CH-CH-CHANGES.png)
+![bowie](https://chch.osm.lol/static/CH-CH-CHANGES.png)
 
 *The missing API for OSM Changeset Metadata queries.*
 
-The OpenStreetMap API [lets you query changeset metadata](https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets), but the usefulness of that API is limited by a result maximum of 100.
+The OpenStreetMap API [lets you query changeset metadata](https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets), but is limited to 100 results per query.
 
-This API lets you query by entire days, hours, minutes, or a range of changeset IDs, and supports additional output formats like `jsonl` for efficient streaming processing.
+This API lets you query by entire days, hours, minutes, or ID ranges, and supports multiple output formats (XML, JSON, JSONL) for efficient batch processing.
 
-## About Changesets
+## Quick Start
 
-Each time an OpenStreetMap contributor uploads edits, a **changeset** is created.  
-A changeset has two components:
+1. download a changeset metadata archive from planet.osm.org
+2. convert it to the partitioned parquet structure using the provided tool
 
-- **Metadata** — when it was opened/closed, by whom, editor used, and contextual tags (this API)
-- **Map changes** — the actual edits to OSM data
+```bash
+uv run chch-convert-py -i changesets-latest.osm.bz2 --output-dir /data/base --partition
+```
 
-The tools / server in this project deal with the metadata only. 
+3. start the server and worker
 
-## Technical Details
+```bash
+docker-compose up -d
+```
 
-The system basically consists of three Rust binaries:
-
-- `changesets-to-parquet` — archive ingestion
-- `changeset-server` — API server
-- `changeset-replication-worker` — minutely replication ingestion
-
-### Database-less Architecture
-
-- Hive-partitioned Parquet files (`year=YYYY/month=MM/*.parquet`)
-- Queried directly using embedded DuckDB
-- No indexes, no traditional DB
-- Works on local disk, NFS, or S3-compatible storage
-
-
-### Lambda Architecture
-
-- **Base layer** — immutable weekly planet snapshots
-- **Delta layer** — minutely replication batched into hourly Parquet
-
-Queries read both layers and deduplicate via `replication_sequence`.
-
-
-### Smart Batching
-
-Replication data is flushed when:
-
-- Hour boundary is crossed
-- 120 sequences accumulate
-- Worker shuts down
-
-This avoids millions of tiny files while keeping data fresh.
-
-
-### Zero-Downtime Updates
-
-The API watches the filesystem and immediately serves new Parquet partitions as they appear.
-
-### Trade-offs and Quirks
-
-- Date ranges limited to 1 day
-- >100k changesets rejected
-- Deduplication happens at query-time
-- No spatial queries or SQL interface
-- Replication state files are off-by-one (handled internally)
-
+4. confirm it works
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  OSM Planet     │────▶│    Converter     │────▶│  base/*.parquet │
-│  Dump (.bz2)    │     │                  │     │                 │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                          │
-┌─────────────────┐     ┌──────────────────┐     ┌────────▼────────┐
-│  OSM Replication│────▶│ Replication      │────▶│ delta/*.parquet │
-│  Feed (minutely)│     │ Worker           │     │                 │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                          │
-                        ┌──────────────────┐     ┌────────▼────────┐
-                        │   API Server     │◀────│   DuckDB        │
-                        │   (Axum)         │     │   (in-memory)   │
-                        └────────┬─────────┘     └─────────────────┘
-                                 │
-                        ┌────────▼─────────┐
-                        │   HTTP Clients   │
-                        │   (JSON/XML/JSONL│
-                        └──────────────────┘
+curl http://localhost:3000/health
 ```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete deployment guide.
+
+## How it works
+
+The API uses a database-less DuckDB-based query engine, with a hive-style partitioned parquet file structure backing it. The initial data load creates the structure with the base data `base/year=2026/month=01/`. The replication worker keeps its own parquet file structure that is partitioned in the same way. DuckDB lets you specify an arbitrary list of parquet files to read from. For date ranges, it is trivially straightforward to prune the list of partitions to query. For the other query types, an index is maintained that maps the keys to 

@@ -1,7 +1,34 @@
 _local/
 .DS_Store
 *.osm
+*.osm.gz
+*.osm.bz2
+
+results/
+
 .env.local
 prod.env
+
+data/
+
+# sqlite auth db if stored here..
+*.db*
+
+.zed/
+
+# Python (server + worker)
 __pycache__/
-results/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+
+# Testing / linting
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
