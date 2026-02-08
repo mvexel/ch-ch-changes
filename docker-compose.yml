@@ -12,13 +12,23 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     volumes:
-      - ${DATA_PATH:-./data}:/data:ro  # Read-only - server doesn't write
+      - ${DATA_PATH:-./data}:/data:ro # Read-only - server doesn't write
+    env_file:
+      - .env
     environment:
       - DATA_PATH=/data
       - HOST=0.0.0.0
       - PORT=3000
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - REQUIRE_AUTH=${REQUIRE_AUTH:-false}
+      # Auth - not implemented yet
+      # - OSM_OAUTH_CLIENT_ID
+      # - OSM_OAUTH_CLIENT_SECRET
+      # - OSM_OAUTH_REDIRECT_URL
+      # - AUTH_KEY_SECRET
+      # - AUTH_DB_PATH
+      # - AUTH_DEFAULT_DAILY_LIMIT
+      # - AUTH_DEFAULT_MONTHLY_LIMIT
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:3000/health" ]
@@ -33,15 +43,13 @@ services:
     container_name: chch-worker
     command: chchchanges.worker.main
     volumes:
-      - ${DATA_PATH:-./data}:/data  # Read-write - worker writes new data
+      - ${DATA_PATH:-./data}:/data # Read-write - worker writes new data
+    env_file:
+      - .env
     environment:
       - DATA_PATH=/data
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - POLL_INTERVAL_SECONDS=${POLL_INTERVAL_SECONDS:-60}
-      - MAX_SEQUENCES_PER_RUN=${MAX_SEQUENCES_PER_RUN:-1000}
-      - HOURLY_BATCHING=${HOURLY_BATCHING:-true}
-      - ENABLE_COMPACTION=${ENABLE_COMPACTION:-true}
-      - COMPACTION_AGE_HOURS=${COMPACTION_AGE_HOURS:-24}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     restart: unless-stopped
     depends_on:
       - server

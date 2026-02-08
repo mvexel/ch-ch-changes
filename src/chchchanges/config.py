@@ -50,15 +50,10 @@ class WorkerConfig(BaseSettings):
     REPLICATION_STATE_FILE: Optional[str] = None
     REPLICATION_TMP_DIR: Optional[str] = None
     CHANGESET_REPLICATION_URL: str = "https://planet.openstreetmap.org/replication/changesets/"
-    POLL_INTERVAL_SECONDS: int = 60
-    MAX_SEQUENCES_PER_RUN: Optional[int] = None
     REPLICATION_START_SEQUENCE: Optional[int] = None
     REPLICATION_START_TIMESTAMP: Optional[str] = None
-    HOURLY_BATCHING: bool = True
-    ENABLE_COMPACTION: bool = False
-    COMPACTION_AGE_HOURS: int = 24
 
-    @field_validator("REPLICATION_START_SEQUENCE", "MAX_SEQUENCES_PER_RUN", mode="before")
+    @field_validator("REPLICATION_START_SEQUENCE", mode="before")
     @classmethod
     def empty_str_to_none(cls, v):
         """Convert empty strings to None for optional int fields."""

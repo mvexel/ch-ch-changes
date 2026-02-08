@@ -263,15 +263,15 @@ def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
             logger.info(
                 "Caught up at sequence %d, sleeping %ds",
                 local_sequence,
-                config.POLL_INTERVAL_SECONDS,
+                60,
             )
-            time.sleep(config.POLL_INTERVAL_SECONDS)
+            time.sleep(60)
             continue
 
         sequences_to_process = end_sequence - local_sequence
-        if config.MAX_SEQUENCES_PER_RUN:
-            sequences_to_process = min(sequences_to_process, config.MAX_SEQUENCES_PER_RUN)
-            end_sequence = local_sequence + sequences_to_process
+        # Limit catch-up batch size to avoid OOM
+        sequences_to_process = min(sequences_to_process, 1000)
+        end_sequence = local_sequence + sequences_to_process
 
         logger.info(
             "Processing sequences %d -> %d (%d sequences)",
@@ -280,7 +280,7 @@ def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
             sequences_to_process,
         )
 
-        batch = HourlyBatch() if config.HOURLY_BATCHING else None
+        batch = HourlyBatch()
         max_batch_sequences = args.max_batch_sequences
 
         # Fetch sequences in parallel batches
@@ -313,23 +313,18 @@ def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
                         "last_run", datetime.now(timezone.utc).isoformat()
                     )
 
-                    if batch is not None:
-                        # Hourly batching mode
-                        boundary = batch.add(changesets, seq, seq_timestamp)
-                        if boundary or batch.sequence_count >= max_batch_sequences:
-                            # Flush current batch
-                            batch_cs, hour = batch.take_batch()
-                            if batch_cs:
-                                filename = f"data_{hour}.parquet"
-                                stats = write_partitioned(batch_cs, delta_dir, filename=filename)
-                                update_metadata_incremental(metadata_path, stats)
-                                logger.info("Wrote %d changesets for hour %s", len(batch_cs), hour)
-                            # Re-add the current changesets (they're for the new hour)
-                            batch.add(changesets, seq, seq_timestamp)
-                    else:
-                        # Per-sequence mode
-                        stats = write_partitioned(changesets, delta_dir)
-                        update_metadata_incremental(metadata_path, stats)
+                    # Hourly batching mode
+                    boundary = batch.add(changesets, seq, seq_timestamp)
+                    if boundary or batch.sequence_count >= max_batch_sequences:
+                        # Flush current batch
+                        batch_cs, hour = batch.take_batch()
+                        if batch_cs:
+                            filename = f"data_{hour}.parquet"
+                            stats = write_partitioned(batch_cs, delta_dir, filename=filename)
+                            update_metadata_incremental(metadata_path, stats)
+                            logger.info("Wrote %d changesets for hour %s", len(batch_cs), hour)
+                        # Re-add the current changesets (they're for the new hour)
+                        batch.add(changesets, seq, seq_timestamp)
 
                     # Update state
                     last_run = seq_timestamp
@@ -347,7 +342,7 @@ def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
                 raise
 
         # Flush remaining batch
-        if batch is not None and len(batch) > 0:
+        if len(batch) > 0:
             batch_cs, hour = batch.flush()
             if batch_cs:
                 filename = f"data_{hour}.parquet"
@@ -358,11 +353,10 @@ def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
         # Update local_sequence to the last sequence we processed
         local_sequence = end_sequence - 1
 
-        # Optional compaction
-        if config.ENABLE_COMPACTION:
-            compacted = compact_old_deltas(delta_dir, config.COMPACTION_AGE_HOURS)
-            if compacted:
-                logger.info("Compacted %d old delta files", compacted)
+        # Compaction (hardcoded to enabled, 24h retention)
+        compacted = compact_old_deltas(delta_dir, 24)
+        if compacted:
+            logger.info("Compacted %d old delta files", compacted)
 
         if args.once:
             logger.info("Finished single pass at sequence %d", local_sequence)
