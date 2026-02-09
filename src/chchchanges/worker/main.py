@@ -351,7 +351,7 @@ def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
                 logger.info("Flushed %d remaining changesets for hour %s", len(batch_cs), hour)
 
         # Update local_sequence to the last sequence we processed
-        local_sequence = end_sequence - 1
+        local_sequence = end_sequence
 
         # Compaction (hardcoded to enabled, 24h retention)
         compacted = compact_old_deltas(delta_dir, 24)
