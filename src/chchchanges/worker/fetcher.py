@@ -184,15 +184,30 @@ async def fetch_sequence_async(
     url = f"{base_url.rstrip('/')}/{sequence_to_path(sequence)}.osm.gz"
     state_url = f"{base_url.rstrip('/')}/{sequence_to_path(sequence)}.state.txt"
 
-    # Fetch both .osm.gz and .state.txt in parallel
-    osm_resp, state_resp = await asyncio.gather(
-        _fetch_with_retry_async(url, client), _fetch_with_retry_async(state_url, client)
-    )
-
-    # Decompress OSM data (gzip.decompress works on bytes directly)
+    # Check if we already have the data
     xml_path = tmp_dir / f"{sequence}.osm"
-    xml_data = gzip.decompress(osm_resp.content)
-    xml_path.write_bytes(xml_data)
+    gz_path = tmp_dir / f"{sequence}.osm.gz"
+
+    if xml_path.exists():
+        logger.debug("Sequence %d: already have XML", sequence)
+        # Still need state, fetch it
+        state_resp = await _fetch_with_retry_async(state_url, client)
+    elif gz_path.exists():
+        logger.debug("Sequence %d: already have GZ", sequence)
+        # Decompress existing GZ
+        xml_data = gzip.decompress(gz_path.read_bytes())
+        xml_path.write_bytes(xml_data)
+        # Still need state
+        state_resp = await _fetch_with_retry_async(state_url, client)
+    else:
+        # Fetch both .osm.gz and .state.txt in parallel
+        osm_resp, state_resp = await asyncio.gather(
+            _fetch_with_retry_async(url, client), _fetch_with_retry_async(state_url, client)
+        )
+
+        # Decompress OSM data (gzip.decompress works on bytes directly)
+        xml_data = gzip.decompress(osm_resp.content)
+        xml_path.write_bytes(xml_data)
 
     # Parse state
     state = {}
