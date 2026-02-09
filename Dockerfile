@@ -12,6 +12,7 @@ WORKDIR /app
 # Copy project files
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
+COPY static/ ./static/
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
