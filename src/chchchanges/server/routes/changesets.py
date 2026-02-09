@@ -43,6 +43,10 @@ def _parse_filters(
     offset: int | None = None,
     order_by: str | None = None,
     order_direction: str | None = None,
+    min_duration_seconds: int | None = None,
+    max_duration_seconds: int | None = None,
+    min_bbox_area_km2: float | None = None,
+    max_bbox_area_km2: float | None = None,
 ) -> QueryFilters:
     return QueryFilters(
         username=user,
@@ -52,6 +56,10 @@ def _parse_filters(
         offset=offset,
         order_by=order_by,
         order_direction=order_direction,
+        min_duration_seconds=min_duration_seconds,
+        max_duration_seconds=max_duration_seconds,
+        min_bbox_area_km2=min_bbox_area_km2,
+        max_bbox_area_km2=max_bbox_area_km2,
     )
 
 
@@ -130,10 +138,14 @@ async def get_changesets_by_day(
     offset: int | None = None,
     order_by: str | None = None,
     order_direction: str | None = None,
+    min_duration_seconds: int | None = None,
+    max_duration_seconds: int | None = None,
+    min_bbox_area_km2: float | None = None,
+    max_bbox_area_km2: float | None = None,
 ):
     date_str, ext_fmt = _extract_extension(date_str)
     fmt = format or ext_fmt
-    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction)
+    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction, min_duration_seconds, max_duration_seconds, min_bbox_area_km2, max_bbox_area_km2)
 
     date = _parse_date(date_str)
     start = date.replace(hour=0, minute=0, second=0)
@@ -155,10 +167,14 @@ async def get_changesets_by_date_range(
     offset: int | None = None,
     order_by: str | None = None,
     order_direction: str | None = None,
+    min_duration_seconds: int | None = None,
+    max_duration_seconds: int | None = None,
+    min_bbox_area_km2: float | None = None,
+    max_bbox_area_km2: float | None = None,
 ):
     end_str, ext_fmt = _extract_extension(end_str)
     fmt = format or ext_fmt
-    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction)
+    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction, min_duration_seconds, max_duration_seconds, min_bbox_area_km2, max_bbox_area_km2)
 
     start_date = _parse_date(start_str, "start date")
     end_date = _parse_date(end_str, "end date")
@@ -195,10 +211,14 @@ async def get_changesets_by_hour(
     offset: int | None = None,
     order_by: str | None = None,
     order_direction: str | None = None,
+    min_duration_seconds: int | None = None,
+    max_duration_seconds: int | None = None,
+    min_bbox_area_km2: float | None = None,
+    max_bbox_area_km2: float | None = None,
 ):
     hour_str, ext_fmt = _extract_extension(hour_str)
     fmt = format or ext_fmt
-    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction)
+    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction, min_duration_seconds, max_duration_seconds, min_bbox_area_km2, max_bbox_area_km2)
 
     date = _parse_date(date_str)
     try:
@@ -234,10 +254,14 @@ async def get_changesets_by_minute(
     offset: int | None = None,
     order_by: str | None = None,
     order_direction: str | None = None,
+    min_duration_seconds: int | None = None,
+    max_duration_seconds: int | None = None,
+    min_bbox_area_km2: float | None = None,
+    max_bbox_area_km2: float | None = None,
 ):
     minute_str, ext_fmt = _extract_extension(minute_str)
     fmt = format or ext_fmt
-    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction)
+    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction, min_duration_seconds, max_duration_seconds, min_bbox_area_km2, max_bbox_area_km2)
 
     date = _parse_date(date_str)
     try:
@@ -284,10 +308,14 @@ async def get_changesets_by_id_range(
     offset: int | None = None,
     order_by: str | None = None,
     order_direction: str | None = None,
+    min_duration_seconds: int | None = None,
+    max_duration_seconds: int | None = None,
+    min_bbox_area_km2: float | None = None,
+    max_bbox_area_km2: float | None = None,
 ):
     end_raw, ext_fmt = _extract_extension(end_raw)
     fmt = format or ext_fmt
-    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction)
+    filters = _parse_filters(fmt, user, uid, open, limit, offset, order_by, order_direction, min_duration_seconds, max_duration_seconds, min_bbox_area_km2, max_bbox_area_km2)
 
     try:
         start_id = int(start_raw)

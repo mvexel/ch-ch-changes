@@ -128,12 +128,24 @@
         <li><code>user</code> - Filter by username (e.g., <code>?user=alice</code>)</li>
         <li><code>uid</code> - Filter by user ID (e.g., <code>?uid=123</code>)</li>
         <li><code>open</code> - Filter by open/closed status (e.g., <code>?open=true</code>)</li>
+        <li><code>min_duration_seconds</code> - Filter by minimum changeset duration in seconds (e.g., <code>?min_duration_seconds=3600</code> for changesets open at least 1 hour)</li>
+        <li><code>max_duration_seconds</code> - Filter by maximum changeset duration in seconds (e.g., <code>?max_duration_seconds=60</code> for quick changesets)</li>
+        <li><code>min_bbox_area_km2</code> - Filter by minimum bounding box area in km² (e.g., <code>?min_bbox_area_km2=5.0</code> for large mapping projects)</li>
+        <li><code>max_bbox_area_km2</code> - Filter by maximum bounding box area in km² (e.g., <code>?max_bbox_area_km2=1.0</code> for smaller edits)</li>
         <li><code>limit</code> - Limit number of results (e.g., <code>?limit=100</code>)</li>
         <li><code>offset</code> - Offset for pagination (e.g., <code>?offset=100</code>)</li>
+        <li><code>order_by</code> - Sort results by a field (e.g., <code>?order_by=created_at</code>). Valid fields: <code>id</code>, <code>created_at</code>, <code>closed_at</code>, <code>user</code>, <code>uid</code>, <code>num_changes</code>, <code>comments_count</code>, <code>open</code>, <code>duration_seconds</code>, <code>bbox_area_km2</code></li>
+        <li><code>order_direction</code> - Sort direction: <code>ASC</code> or <code>DESC</code> (e.g., <code>?order_direction=DESC</code>). Defaults to <code>ASC</code></li>
     </ul>
 
     <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
-/changesets/day/20240115.json?user=alice&limit=50</code></pre>
+/changesets/day/20240115.json?user=alice&limit=50
+
+# Example: Find long-running changesets (open > 1 hour)
+/changesets/day/20240115.json?min_duration_seconds=3600
+
+# Example: Find large mapping projects (area > 5 km²) sorted by size
+/changesets/day/20240115.json?min_bbox_area_km2=5.0&order_by=bbox_area_km2&order_direction=DESC</code></pre>
 
     <p>Remember that <em>OSM usernames are case-sensitive, so <code>alice</code> is probably not the same mapper as <code>Alice</code></em>.</p>
 
@@ -147,9 +159,11 @@
         <li><code>open</code> - Boolean (true if changeset is still open)</li>
         <li><code>user</code> - Username (string)</li>
         <li><code>uid</code> - User ID (integer)</li>
-        <li><code>changes_count</code> - Number of edits in this changeset (integer)</li>
+        <li><code>num_changes</code> - Number of edits in this changeset (integer)</li>
         <li><code>comments_count</code> - Number of discussion comments (integer)</li>
         <li><code>min_lat</code>, <code>max_lat</code>, <code>min_lon</code>, <code>max_lon</code> - Bounding box coordinates (decimal degrees, optional - only present if changeset has geographic extent)</li>
+        <li><code>duration_seconds</code> - Time between created_at and closed_at in seconds (integer, optional - only present for closed changesets)</li>
+        <li><code>bbox_area_km2</code> - Approximate bounding box area in square kilometers, computed using the Haversine formula (float, optional - only present if all coordinates are available, 0.0 for point geometries)</li>
         <li><code>tags</code> - Key-value metadata tags (map/object). Common tags include:
             <ul>
                 <li><code>comment</code> - Changeset description/summary</li>
