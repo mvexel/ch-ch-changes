@@ -58,7 +58,11 @@
     </style>
 </head>
 
-<h1><img src="/static/chchchanges.png"> chchchanges</h1>
+<h1><img src="chchchanges.png"> chchchanges</h1>
+
+<blockquote><b>This service will be discontinued on 2026-05-31.</b> The project code continues to live in <a
+        href="https://codeberg.org/mvexel/ch-ch-changes">Codeberg</a>. You are very welcome to host it yourself, andx I
+    would be happy to provide help where I can -- Martijn</blockquote>
 
 <p><em>The missing API for OSM changeset metadata queries.</em></p>
 
@@ -167,21 +171,27 @@
     <li><code>uid</code> - Filter by user ID (e.g., <code>?uid=123</code>)</li>
     <li><code>open</code> - Filter by open/closed status (e.g., <code>?open=true</code>)</li>
     <li><code>min_duration_seconds</code> - Filter by minimum changeset duration in seconds (e.g.,
-        <code>?min_duration_seconds=3600</code> for changesets open at least 1 hour)</li>
+        <code>?min_duration_seconds=3600</code> for changesets open at least 1 hour)
+    </li>
     <li><code>max_duration_seconds</code> - Filter by maximum changeset duration in seconds (e.g.,
-        <code>?max_duration_seconds=60</code> for quick changesets)</li>
+        <code>?max_duration_seconds=60</code> for quick changesets)
+    </li>
     <li><code>min_bbox_area_km2</code> - Filter by minimum bounding box area in km² (e.g.,
-        <code>?min_bbox_area_km2=5.0</code> for large mapping projects)</li>
+        <code>?min_bbox_area_km2=5.0</code> for large mapping projects)
+    </li>
     <li><code>max_bbox_area_km2</code> - Filter by maximum bounding box area in km² (e.g.,
-        <code>?max_bbox_area_km2=1.0</code> for smaller edits)</li>
+        <code>?max_bbox_area_km2=1.0</code> for smaller edits)
+    </li>
     <li><code>limit</code> - Limit number of results (e.g., <code>?limit=100</code>)</li>
     <li><code>offset</code> - Offset for pagination (e.g., <code>?offset=100</code>)</li>
     <li><code>order_by</code> - Sort results by a field (e.g., <code>?order_by=created_at</code>). Valid fields:
         <code>id</code>, <code>created_at</code>, <code>closed_at</code>, <code>user</code>, <code>uid</code>,
         <code>num_changes</code>, <code>comments_count</code>, <code>open</code>, <code>duration_seconds</code>,
-        <code>bbox_area_km2</code></li>
+        <code>bbox_area_km2</code>
+    </li>
     <li><code>order_direction</code> - Sort direction: <code>ASC</code> or <code>DESC</code> (e.g.,
-        <code>?order_direction=DESC</code>). Defaults to <code>ASC</code></li>
+        <code>?order_direction=DESC</code>). Defaults to <code>ASC</code>
+    </li>
 </ul>
 
 <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
@@ -231,7 +241,8 @@
 
 <p>The system consists of three components: a <strong>converter</strong> for bulk importing planet dump files, a
     <strong>server</strong> that serves the API, and a <strong>worker</strong> that continuously fetches and processes
-    minutely replication data from OpenStreetMap.</p>
+    minutely replication data from OpenStreetMap.
+</p>
 
 <h3>Database-less Architecture</h3>
 
