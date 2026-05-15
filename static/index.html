@@ -55,10 +55,16 @@
         ul {
             padding-left: 20px;
         }
+
+        blockquote {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+        }
     </style>
 </head>
 
-<h1><img src="chchchanges.png"> chchchanges</h1>
+<h1><img src="static/CH-CH-CHANGES.png"> chchchanges</h1>
 
 <blockquote><b>This service will be discontinued on 2026-05-31.</b> The project code continues to live in <a
         href="https://codeberg.org/mvexel/ch-ch-changes">Codeberg</a>. You are very welcome to host it yourself, andx I
@@ -95,13 +101,13 @@
 
 <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}</span> - All changesets on a date</p>
 <pre><code># XML format (default)
-        /changesets/day/20240115
+/changesets/day/20240115
 
-        # JSON format
-        /changesets/day/20240115.json
+# JSON format
+/changesets/day/20240115.json
 
-        # JSONL format (one changeset per line, useful for large results)
-        /changesets/day/20240115.jsonl</code></pre>
+# JSONL format (one changeset per line, useful for large results)
+/changesets/day/20240115.jsonl</code></pre>
 
 <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}</span> - All changesets in a specific hour</p>
 <pre><code>/changesets/day/20240115/hour/23.json</code></pre>
@@ -112,13 +118,13 @@
 
 <p><span class="endpoint">GET /changesets/id/from/{start_id}/to/{end_id}</span> - All changesets in an ID range</p>
 <pre><code># XML format (default)
-        /changesets/id/from/100000/to/100500
+/changesets/id/from/100000/to/100500
 
-        # JSON format
-        /changesets/id/from/100000/to/100500.json
+# JSON format
+/changesets/id/from/100000/to/100500.json
 
-        # With filters
-        /changesets/id/from/100000/to/200000.json?user=alice&limit=100</code></pre>
+# With filters
+/changesets/id/from/100000/to/200000.json?user=alice&limit=100</code></pre>
 
 <p><strong>Note:</strong> ID ranges are limited to 1,000,000 IDs maximum per query. Results are ordered by changeset ID
     ascending.</p>
@@ -126,13 +132,13 @@
 <p><span class="endpoint">GET /changesets/date/from/{start_date}/to/{end_date}</span> - All changesets in a date range
 </p>
 <pre><code># XML format (default)
-        /changesets/date/from/20240115/to/20240116
+/changesets/date/from/20240115/to/20240116
 
-        # JSON format
-        /changesets/date/from/20240115/to/20240116.json
+# JSON format
+/changesets/date/from/20240115/to/20240116.json
 
-        # JSONL format
-        /changesets/date/from/20240115/to/20240116.jsonl</code></pre>
+# JSONL format
+/changesets/date/from/20240115/to/20240116.jsonl</code></pre>
 
 <p><strong>Note:</strong> Date ranges are limited to 1 day maximum (e.g., consecutive dates only). For larger ranges,
     make multiple requests.</p>
@@ -195,13 +201,13 @@
 </ul>
 
 <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
-        /changesets/day/20240115.json?user=alice&limit=50
+/changesets/day/20240115.json?user=alice&limit=50
 
-        # Example: Find long-running changesets (open > 1 hour)
-        /changesets/day/20240115.json?min_duration_seconds=3600
+# Example: Find long-running changesets (open > 1 hour)
+/changesets/day/20240115.json?min_duration_seconds=3600
 
-        # Example: Find large mapping projects (area > 5 km²) sorted by size
-        /changesets/day/20240115.json?min_bbox_area_km2=5.0&order_by=bbox_area_km2&order_direction=DESC</code></pre>
+# Example: Find large mapping projects (area > 5 km²) sorted by size
+/changesets/day/20240115.json?min_bbox_area_km2=5.0&order_by=bbox_area_km2&order_direction=DESC</code></pre>
 
 <p>Remember that <em>OSM usernames are case-sensitive, so <code>alice</code> is probably not the same mapper as
         <code>Alice</code></em>.</p>
