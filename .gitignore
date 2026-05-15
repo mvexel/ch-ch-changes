@@ -1,16 +1,11 @@
-/target
 _local/
-
-# Local configuration files (copy from .example files)
-Caddyfile
-hetzner-config.env
-
 .DS_Store
 *.osm
+*.osm.gz
+*.osm.bz2
 
 results/
 
-.env
 .env.local
 prod.env
 
@@ -19,5 +14,21 @@ data/
 # sqlite auth db if stored here..
 *.db*
 
-
 .zed/
+
+# Python (server + worker)
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+
+# Testing / linting
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/

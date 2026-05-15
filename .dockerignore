@@ -1,0 +1,44 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.zed/
+.vscode/
+.idea/
+
+# Build artifacts
+target/
+crates/
+Cargo.*
+
+# Local files
+_local/
+.env.local
+prod.env
+.DS_Store
+*.osm
+
+# Test data
+data/
+tests/
+
+# Documentation
+*.md
+!README.md
+loadtest/
+extra/

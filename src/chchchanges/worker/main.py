@@ -1,0 +1,393 @@
+"""Replication worker — fetches OSM changeset diffs and writes Parquet."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from chchchanges.config import WorkerConfig
+from chchchanges.core.metadata import get_metadata_path, update_metadata_incremental
+from chchchanges.core.parsing import parse_changesets
+from chchchanges.core.writer import write_partitioned
+from chchchanges.models import Changeset
+from chchchanges.worker.compaction import compact_old_deltas
+from chchchanges.worker.fetcher import fetch_sequences_parallel, fetch_state
+
+logger = logging.getLogger(__name__)
+
+
+class HourlyBatch:
+    """Accumulates changesets for an hour, flushing on hour boundary."""
+
+    def __init__(self):
+        self.changesets: list[Changeset] = []
+        self.batch_hour: str | None = None
+        self.start_sequence: int | None = None
+        self.end_sequence: int | None = None
+        self.sequence_count: int = 0
+
+    def add(self, changesets: list[Changeset], sequence: int, timestamp: str) -> bool:
+        """Add changesets. Returns True if hour boundary was crossed."""
+        hour = timestamp[:13].replace("-", "").replace("T", "").replace(":", "")[:10]
+
+        if self.batch_hour is None:
+            self.batch_hour = hour
+            self.start_sequence = sequence
+
+        boundary_crossed = hour != self.batch_hour
+
+        if boundary_crossed:
+            return True
+
+        self.changesets.extend(changesets)
+        self.end_sequence = sequence
+        self.sequence_count += 1
+        return False
+
+    def take_batch(self) -> tuple[list[Changeset], str]:
+        """Take the current batch, resetting for a new hour."""
+        cs = self.changesets
+        hour = self.batch_hour or ""
+        self.changesets = []
+        self.batch_hour = None
+        self.start_sequence = None
+        self.end_sequence = None
+        self.sequence_count = 0
+        return cs, hour
+
+    def flush(self) -> tuple[list[Changeset], str]:
+        """Get remaining changesets without full reset."""
+        return self.take_batch()
+
+    def __len__(self) -> int:
+        return len(self.changesets)
+
+
+def _write_state(state_file: Path, sequence: int, last_run: str) -> None:
+    """Write state.yaml atomically."""
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = state_file.with_suffix(".yaml.tmp")
+    tmp.write_text(f"---\nsequence: {sequence}\nlast_run: {last_run}\n")
+    os.replace(tmp, state_file)
+
+
+def _load_local_state(state_file: Path) -> dict | None:
+    """Load local state.yaml if it exists."""
+    if not state_file.exists():
+        return None
+    content = state_file.read_text()
+    result = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if line.startswith("sequence:"):
+            result["sequence"] = int(line.split(":", 1)[1].strip())
+        elif line.startswith("last_run:"):
+            result["last_run"] = line.split(":", 1)[1].strip()
+    return result if "sequence" in result else None
+
+
+def _bootstrap_from_parquet(data_path: Path) -> int | None:
+    """Try to find the latest replication_sequence from existing Parquet data."""
+    import duckdb
+
+    globs = []
+    for subdir in ("delta", "base"):
+        d = data_path / subdir
+        if d.exists() and any(d.rglob("*.parquet")):
+            globs.append(str(d / "**/*.parquet"))
+
+    if not globs:
+        return None
+
+    try:
+        conn = duckdb.connect(":memory:")
+        source = ", ".join(f"'{g}'" for g in globs)
+        sql = (
+            f"SELECT MAX(replication_sequence) "
+            f"FROM read_parquet([{source}], hive_partitioning=true)"
+        )
+        row = conn.execute(sql).fetchone()
+        conn.close()
+        if row and row[0] is not None:
+            return int(row[0])
+    except Exception as e:
+        logger.warning("Bootstrap from parquet failed: %s", e)
+    return None
+
+
+def _smart_backfill_sequence(data_path: Path, current_sequence: int) -> int | None:
+    """Estimate starting sequence based on base layer cutoff timestamp.
+
+    If base layer exists but has no replication_sequence values (planet dump),
+    estimate the sequence to start backfill from based on the latest timestamp
+    in the base layer.
+
+    Returns None if:
+    - No base layer found
+    - Base layer is > 30 days stale (user should reload)
+
+    Otherwise returns estimated sequence with 12-hour safety buffer.
+    """
+    from datetime import datetime, timezone
+
+    import duckdb
+
+    base_dir = data_path / "base"
+    if not base_dir.exists() or not any(base_dir.rglob("*.parquet")):
+        return None
+
+    try:
+        conn = duckdb.connect(":memory:")
+        # Query latest timestamp (prefer closed_at, fallback to created_at)
+        sql = f"""
+            SELECT
+                COALESCE(MAX(closed_at), MAX(created_at)) as latest_timestamp
+            FROM read_parquet('{base_dir}/**/*.parquet', hive_partitioning=true)
+        """
+        row = conn.execute(sql).fetchone()
+        conn.close()
+
+        if not row or row[0] is None:
+            return None
+
+        # Convert to datetime (DuckDB returns datetime or timestamp)
+        base_cutoff = row[0]
+        if isinstance(base_cutoff, int):
+            # Milliseconds since epoch
+            base_cutoff = datetime.fromtimestamp(base_cutoff / 1000, tz=timezone.utc)
+        elif not isinstance(base_cutoff, datetime):
+            # String timestamp
+            base_cutoff = datetime.fromisoformat(str(base_cutoff).replace("Z", "+00:00"))
+        elif base_cutoff.tzinfo is None:
+            base_cutoff = base_cutoff.replace(tzinfo=timezone.utc)
+
+        now = datetime.now(timezone.utc)
+        age_days = (now - base_cutoff).total_seconds() / 86400
+
+        # Refuse to backfill if base is too stale
+        if age_days > 30:
+            logger.error(
+                "Base layer is %.1f days old (cutoff: %s). "
+                "Data is too stale for backfill. Please reload from fresh planet dump.",
+                age_days,
+                base_cutoff.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            )
+            raise SystemExit(
+                f"Base layer too stale ({age_days:.1f} days). "
+                "Download fresh planet dump and reload."
+            )
+
+        # Estimate sequence with safety buffer
+        delta_minutes = (now - base_cutoff).total_seconds() / 60
+        buffer_minutes = 720  # 12 hours
+        # Estimate 1.2 sequences per minute (accounts for gaps)
+        estimated_gap = int((delta_minutes + buffer_minutes) * 1.2)
+        estimated_sequence = max(0, current_sequence - estimated_gap)
+
+        logger.info(
+            "Smart backfill: base cutoff %s (%.1f days ago), "
+            "estimated start sequence %d (current: %d, backfilling ~%d sequences)",
+            base_cutoff.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            age_days,
+            estimated_sequence,
+            current_sequence,
+            current_sequence - estimated_sequence,
+        )
+
+        return estimated_sequence
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        logger.warning("Smart backfill estimation failed: %s", e)
+        return None
+
+
+def run_replication(args: argparse.Namespace, config: WorkerConfig) -> None:
+    """Main replication loop."""
+    delta_dir = config.get_delta_dir()
+    state_file = config.get_state_file()
+    tmp_dir = config.get_tmp_dir()
+    base_url = config.CHANGESET_REPLICATION_URL
+    metadata_path = get_metadata_path(Path(config.DATA_PATH))
+
+    delta_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine starting sequence
+    local_state = _load_local_state(state_file)
+    if local_state:
+        local_sequence = local_state["sequence"]
+        logger.info("Resuming from local state: sequence %d", local_sequence)
+    elif args.start_sequence is not None:
+        local_sequence = args.start_sequence
+        logger.info("Starting from explicit sequence: %d", local_sequence)
+    elif not args.no_bootstrap:
+        # Try to bootstrap from existing replication_sequence values
+        bootstrapped = _bootstrap_from_parquet(Path(config.DATA_PATH))
+        if bootstrapped is not None:
+            local_sequence = bootstrapped
+            logger.info("Bootstrapped from parquet replication_sequence: %d", local_sequence)
+        else:
+            # No replication_sequence found, try smart backfill from base timestamp
+            remote = fetch_state(base_url)
+            remote_sequence = remote["sequence"]
+            smart_start = _smart_backfill_sequence(Path(config.DATA_PATH), remote_sequence)
+            if smart_start is not None:
+                local_sequence = smart_start
+            else:
+                # No base layer or estimation failed, start from current
+                local_sequence = remote_sequence
+                logger.info("Starting from remote latest: sequence %d", local_sequence)
+    else:
+        remote = fetch_state(base_url)
+        local_sequence = remote["sequence"]
+        logger.info("Starting from remote latest: sequence %d", local_sequence)
+
+    while True:
+        # Fetch remote state
+        remote = fetch_state(base_url)
+        remote_sequence = remote["sequence"]
+        # OSM state files are off-by-one
+        end_sequence = remote_sequence + 1
+
+        if local_sequence >= end_sequence:
+            if args.once:
+                logger.info("Caught up at sequence %d, exiting (--once)", local_sequence)
+                return
+            logger.info(
+                "Caught up at sequence %d, sleeping %ds",
+                local_sequence,
+                60,
+            )
+            time.sleep(60)
+            continue
+
+        sequences_to_process = end_sequence - local_sequence
+        # Limit catch-up batch size to avoid OOM
+        sequences_to_process = min(sequences_to_process, 1000)
+        end_sequence = local_sequence + sequences_to_process
+
+        logger.info(
+            "Processing sequences %d -> %d (%d sequences)",
+            local_sequence,
+            end_sequence - 1,
+            sequences_to_process,
+        )
+
+        batch = HourlyBatch()
+        max_batch_sequences = args.max_batch_sequences
+
+        # Fetch sequences in parallel batches
+        sequences = list(range(local_sequence + 1, end_sequence + 1))
+
+        try:
+            # Fetch all sequences in parallel
+            logger.info("Fetching %d sequences in parallel...", len(sequences))
+            results = asyncio.run(fetch_sequences_parallel(base_url, sequences, tmp_dir))
+
+            # Process each result in order
+            for seq, xml_path, seq_state in results:
+                try:
+                    # Parse
+                    changesets = list(
+                        parse_changesets(str(xml_path), continue_on_error=args.continue_on_error)
+                    )
+                    xml_path.unlink(missing_ok=True)
+
+                    if not changesets:
+                        logger.debug("Sequence %d: no changesets", seq)
+                        continue
+
+                    # Set replication_sequence on all changesets
+                    for cs in changesets:
+                        cs.replication_sequence = seq
+
+                    # Get timestamp from state
+                    seq_timestamp = seq_state.get(
+                        "last_run", datetime.now(timezone.utc).isoformat()
+                    )
+
+                    # Hourly batching mode
+                    boundary = batch.add(changesets, seq, seq_timestamp)
+                    if boundary or batch.sequence_count >= max_batch_sequences:
+                        # Flush current batch
+                        batch_cs, hour = batch.take_batch()
+                        if batch_cs:
+                            filename = f"data_{hour}.parquet"
+                            stats = write_partitioned(batch_cs, delta_dir, filename=filename)
+                            update_metadata_incremental(metadata_path, stats)
+                            logger.info("Wrote %d changesets for hour %s", len(batch_cs), hour)
+                        # Re-add the current changesets (they're for the new hour)
+                        batch.add(changesets, seq, seq_timestamp)
+
+                    # Update state
+                    last_run = seq_timestamp
+                    _write_state(state_file, seq, last_run)
+
+                except Exception:
+                    logger.exception("Error processing sequence %d", seq)
+                    if not args.continue_on_error:
+                        raise
+                    continue
+
+        except Exception:
+            logger.exception("Error fetching sequences %d -> %d", local_sequence + 1, end_sequence)
+            if not args.continue_on_error:
+                raise
+
+        # Flush remaining batch
+        if len(batch) > 0:
+            batch_cs, hour = batch.flush()
+            if batch_cs:
+                filename = f"data_{hour}.parquet"
+                stats = write_partitioned(batch_cs, delta_dir, filename=filename)
+                update_metadata_incremental(metadata_path, stats)
+                logger.info("Flushed %d remaining changesets for hour %s", len(batch_cs), hour)
+
+        # Update local_sequence to the last sequence we processed
+        local_sequence = end_sequence
+
+        # Compaction (hardcoded to enabled, 24h retention)
+        compacted = compact_old_deltas(delta_dir, 24)
+        if compacted:
+            logger.info("Compacted %d old delta files", compacted)
+
+        if args.once:
+            logger.info("Finished single pass at sequence %d", local_sequence)
+            return
+
+        # Clean temp dir
+        if not args.keep_temp:
+            for f in tmp_dir.glob("*"):
+                f.unlink(missing_ok=True)
+
+
+def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    config = WorkerConfig()
+
+    parser = argparse.ArgumentParser(description="ch-ch-changes replication worker")
+    parser.add_argument("--start-sequence", type=int, default=config.REPLICATION_START_SEQUENCE)
+    parser.add_argument("--once", action="store_true", help="Exit after single catch-up pass")
+    parser.add_argument("--no-bootstrap", action="store_true", help="Disable parquet bootstrap")
+    parser.add_argument("--batch-size", type=int, default=10000)
+    parser.add_argument("--continue-on-error", action="store_true")
+    parser.add_argument("--keep-temp", action="store_true")
+    parser.add_argument("--max-batch-sequences", type=int, default=120)
+
+    args = parser.parse_args()
+    run_replication(args, config)
+
+
+if __name__ == "__main__":
+    main()

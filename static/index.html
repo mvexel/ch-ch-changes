@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ch-ch-changes - the missing OpenStreetMap changeset metadata query</title>
+    <title>chchchanges - the missing OpenStreetMap changeset metadata query</title>
     <style>
         body {
             max-width: 800px;
@@ -34,16 +34,16 @@
     </style>
 </head>
 
-    <h1><img src="CH-CH-CHANGES.png"> ch-ch-changes</h1>
+    <h1><img src="/static/chchchanges.png"> chchchanges</h1>
 
     <p><em>The missing API for OSM changeset metadata queries.</em></p>
 
     <p>The OpenStreetMap API <a href="https://wiki.openstreetmap.org/wiki/API_v0.6#Query:_GET_/api/0.6/changesets" target="_blank">lets you query changeset metadata</a>,
         but the usefulness of that API is limited by a result maximum of 100.</p>
 
-    <p>This API lets you query by entire days, hours, minutes, or ID ranges, and supports additional output formats like `jsonl` for efficient streaming processing.</p>
+    <p>This API lets you query by entire days, hours, minutes, or ID ranges, and supports additional output formats like jsonl for efficient streaming processing.</p>
 
-    <p>The code is open source (MIT), you can find it on <a href="https://codeberg.org/mvexel/osm-changeset-api">Codeberg</a></p>
+    <p>The code is open source (ISC), you can find it on <a href="https://codeberg.org/mvexel/chchchanges">Codeberg</a></p>
 
     <h2>About Changesets</h2>
 
@@ -56,47 +56,59 @@
         There are some links below if you want to learn more.
     </p>
 
-    <h2>Authentication</h2>
-    <p>All data endpoints require an API key. Get one by logging in via OSM <a href="/auth/osm/start">here</a>. You will be issued a new API key after. Save it; it will not be shown again. Signing in again rotates the key.</p>
-    <pre><code>curl -H "Authorization: Bearer YOUR_KEY" https://{{.Host}}/changesets/day/20240115.json</code></pre>
-
     <h2>API Endpoints</h2>
 
     <p><span class="endpoint">GET /health</span> - Health check</p>
-    <pre><code>https://{{.Host}}/health</code></pre>
+    <pre><code>/health</code></pre>
 
-    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}</span> - All changesets on a date 🔐</p>
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}</span> - All changesets on a date</p>
     <pre><code># XML format (default)
-https://{{.Host}}/changesets/day/20240115
+/changesets/day/20240115
 
 # JSON format
-https://{{.Host}}/changesets/day/20240115.json
+/changesets/day/20240115.json
 
 # JSONL format (one changeset per line, useful for large results)
-https://{{.Host}}/changesets/day/20240115.jsonl</code></pre>
+/changesets/day/20240115.jsonl</code></pre>
 
-    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}</span> - All changesets in a specific hour 🔐</p>
-    <pre><code>https://{{.Host}}/changesets/day/20240115/hour/23.json</code></pre>
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}</span> - All changesets in a specific hour</p>
+    <pre><code>/changesets/day/20240115/hour/23.json</code></pre>
 
-    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}/minute/{MM}</span> - All changesets in a specific minute 🔐</p>
-    <pre><code>https://{{.Host}}/changesets/day/20240115/hour/23/minute/59.json</code></pre>
+    <p><span class="endpoint">GET /changesets/day/{YYYYMMDD}/hour/{HH}/minute/{MM}</span> - All changesets in a specific minute</p>
+    <pre><code>/changesets/day/20240115/hour/23/minute/59.json</code></pre>
 
-    <p><span class="endpoint">GET /changesets/id/from/{start_id}/to/{end_id}</span> - All changesets in an ID range 🔐</p>
+    <p><span class="endpoint">GET /changesets/id/from/{start_id}/to/{end_id}</span> - All changesets in an ID range</p>
     <pre><code># XML format (default)
-https://{{.Host}}/changesets/id/from/100000/to/100500
+/changesets/id/from/100000/to/100500
 
 # JSON format
-https://{{.Host}}/changesets/id/from/100000/to/100500.json
+/changesets/id/from/100000/to/100500.json
 
 # With filters
-https://{{.Host}}/changesets/id/from/100000/to/200000.json?user=alice&limit=100</code></pre>
+/changesets/id/from/100000/to/200000.json?user=alice&limit=100</code></pre>
     <p><strong>Note:</strong> ID ranges are limited to 1,000,000 IDs maximum per query. Results are ordered by changeset ID ascending.</p>
 
-    <p><span class="endpoint">GET /meta/state</span> - Replication state info</p>
-    <pre><code>https://{{.Host}}/meta/state</code></pre>
+    <p><span class="endpoint">GET /changesets/date/from/{start_date}/to/{end_date}</span> - All changesets in a date range</p>
+    <pre><code># XML format (default)
+/changesets/date/from/20240115/to/20240116
 
-    <p><span class="endpoint">GET /auth/me</span> - Account limits &amp; usage 🔐</p>
-    <pre><code>https://{{.Host}}/auth/me</code></pre>
+# JSON format
+/changesets/date/from/20240115/to/20240116.json
+
+# JSONL format
+/changesets/date/from/20240115/to/20240116.jsonl</code></pre>
+    <p><strong>Note:</strong> Date ranges are limited to 1 day maximum (e.g., consecutive dates only). For larger ranges, make multiple requests.</p>
+
+    <p><span class="endpoint">GET /meta/state</span> - Dataset statistics and replication status</p>
+    <pre><code>/meta/state</code></pre>
+    <p>Returns comprehensive dataset information including:</p>
+    <ul>
+        <li>Local replication sequence and time since last update</li>
+        <li>Changeset ID range (earliest/latest)</li>
+        <li>Total changeset count (approximate, may include duplicates between base/delta layers)</li>
+        <li>OSM server's current sequence and how far behind we are</li>
+    </ul>
+    <p>Use this endpoint to monitor data freshness and detect replication issues. If <code>sequences_behind</code> is consistently high or <code>seconds_since_update</code> is large, the replication worker may be down.</p>
 
     <h3>Format Options</h3>
 
@@ -111,17 +123,29 @@ https://{{.Host}}/changesets/id/from/100000/to/200000.json?user=alice&limit=100<
 
     <h3>Query Parameters</h3>
 
-    <p>Batch endpoints (day/hour/minute/ID range) support filtering and pagination:</p>
+    <p>Batch endpoints (day/hour/minute/date range/ID range) support filtering and pagination:</p>
     <ul>
         <li><code>user</code> - Filter by username (e.g., <code>?user=alice</code>)</li>
         <li><code>uid</code> - Filter by user ID (e.g., <code>?uid=123</code>)</li>
         <li><code>open</code> - Filter by open/closed status (e.g., <code>?open=true</code>)</li>
+        <li><code>min_duration_seconds</code> - Filter by minimum changeset duration in seconds (e.g., <code>?min_duration_seconds=3600</code> for changesets open at least 1 hour)</li>
+        <li><code>max_duration_seconds</code> - Filter by maximum changeset duration in seconds (e.g., <code>?max_duration_seconds=60</code> for quick changesets)</li>
+        <li><code>min_bbox_area_km2</code> - Filter by minimum bounding box area in km² (e.g., <code>?min_bbox_area_km2=5.0</code> for large mapping projects)</li>
+        <li><code>max_bbox_area_km2</code> - Filter by maximum bounding box area in km² (e.g., <code>?max_bbox_area_km2=1.0</code> for smaller edits)</li>
         <li><code>limit</code> - Limit number of results (e.g., <code>?limit=100</code>)</li>
         <li><code>offset</code> - Offset for pagination (e.g., <code>?offset=100</code>)</li>
+        <li><code>order_by</code> - Sort results by a field (e.g., <code>?order_by=created_at</code>). Valid fields: <code>id</code>, <code>created_at</code>, <code>closed_at</code>, <code>user</code>, <code>uid</code>, <code>num_changes</code>, <code>comments_count</code>, <code>open</code>, <code>duration_seconds</code>, <code>bbox_area_km2</code></li>
+        <li><code>order_direction</code> - Sort direction: <code>ASC</code> or <code>DESC</code> (e.g., <code>?order_direction=DESC</code>). Defaults to <code>ASC</code></li>
     </ul>
 
     <pre><code># Example: Get first 50 changesets by user 'alice' on a specific day
-"https://{{.Host}}/changesets/day/20240115.json?user=alice&limit=50"</code></pre>
+/changesets/day/20240115.json?user=alice&limit=50
+
+# Example: Find long-running changesets (open > 1 hour)
+/changesets/day/20240115.json?min_duration_seconds=3600
+
+# Example: Find large mapping projects (area > 5 km²) sorted by size
+/changesets/day/20240115.json?min_bbox_area_km2=5.0&order_by=bbox_area_km2&order_direction=DESC</code></pre>
 
     <p>Remember that <em>OSM usernames are case-sensitive, so <code>alice</code> is probably not the same mapper as <code>Alice</code></em>.</p>
 
@@ -135,9 +159,11 @@ https://{{.Host}}/changesets/id/from/100000/to/200000.json?user=alice&limit=100<
         <li><code>open</code> - Boolean (true if changeset is still open)</li>
         <li><code>user</code> - Username (string)</li>
         <li><code>uid</code> - User ID (integer)</li>
-        <li><code>changes_count</code> - Number of edits in this changeset (integer)</li>
+        <li><code>num_changes</code> - Number of edits in this changeset (integer)</li>
         <li><code>comments_count</code> - Number of discussion comments (integer)</li>
         <li><code>min_lat</code>, <code>max_lat</code>, <code>min_lon</code>, <code>max_lon</code> - Bounding box coordinates (decimal degrees, optional - only present if changeset has geographic extent)</li>
+        <li><code>duration_seconds</code> - Time between created_at and closed_at in seconds (integer, optional - only present for closed changesets)</li>
+        <li><code>bbox_area_km2</code> - Approximate bounding box area in square kilometers, computed using the Haversine formula (float, optional - only present if all coordinates are available, 0.0 for point geometries)</li>
         <li><code>tags</code> - Key-value metadata tags (map/object). Common tags include:
             <ul>
                 <li><code>comment</code> - Changeset description/summary</li>
@@ -150,12 +176,8 @@ https://{{.Host}}/changesets/id/from/100000/to/200000.json?user=alice&limit=100<
 
     <p><strong>Note:</strong> In XML format, changeset comments/descriptions appear as a <code>comment</code> tag. In JSON/JSONL, the same information is in <code>tags.comment</code>.</p>
 
-    <h2>Rate Limits</h2>
-
-    <p>Daily and monthly request limits may be set per account. Check <code>/auth/me</code> for your current limits.</p>
-
     <h2>Technical details</h2>
-    <p>The server consists of a converter <code>changesets-to-parquet</code> for seeding the API with a changeset archive file from OSM, a standalone server binary <code>changeset-server</code> and a replication binary <code>changeset-replication-worker</code> that backfills the changeset data and fetches new replication files from OSM every minute.</p>
+    <p>The system consists of three components: a <strong>converter</strong> for bulk importing planet dump files, a <strong>server</strong> that serves the API, and a <strong>worker</strong> that continuously fetches and processes minutely replication data from OpenStreetMap.</p>
 
     <h3>Database-less Architecture</h3>
     <p>The API has no traditional database backend. Data is stored as hive-partitioned Parquet files (<code>year=YYYY/month=MM/*.parquet</code>), queried directly using DuckDB's embedded SQL engine. Some benefits (not all of which we actually use today) are:</p>
@@ -175,7 +197,7 @@ https://{{.Host}}/changesets/id/from/100000/to/200000.json?user=alice&limit=100<
     <p>The query engine reads both layers simultaneously and deduplicates using the <code>replication_sequence</code> field (higher = newer, <code>NULL</code> = base). This provides up-to-the-minute freshness without rebuilding multi-GB base files.</p>
 
     <h3>Smart Batching</h3>
-    <p>The replication worker doesn't write one file per minute, that would create millions of tiny files. Instead, it uses a <code>BatchAccumulator</code> that aggregates minutely updates into hourly Parquet files, flushing when:</p>
+    <p>The replication worker doesn't write one file per minute — that would create millions of tiny files. Instead, it aggregates minutely updates into hourly Parquet files, flushing when:</p>
     <ul>
         <li>An hour boundary is crossed (natural time partition)</li>
         <li>120 sequences accumulate (safety limit to prevent memory bloat)</li>
@@ -183,8 +205,8 @@ https://{{.Host}}/changesets/id/from/100000/to/200000.json?user=alice&limit=100<
     </ul>
     <p>This balances write efficiency (fewer files, better compression) with query freshness (max 1 hour lag during catch-up).</p>
 
-    <h3>Zero-Downtime Updates</h3>
-    <p>The API server watches the filesystem using <code>notify</code> and automatically picks up new partition files as the replication worker writes them. When a new <code>YYYYMMDDHH.parquet</code> file appears, it's immediately available for queries.</p>
+    <h3>Automatic Updates</h3>
+    <p>The API server periodically scans for new partition files (every 30 seconds). When new Parquet files appear in the data directory, they're automatically discovered and become available for queries.</p>
 
     <h3>Trade-offs and quirks</h3>
     <ul>
@@ -196,10 +218,10 @@ https://{{.Host}}/changesets/id/from/100000/to/200000.json?user=alice&limit=100<
             </ul>
             If your range contains more than 100k changesets, use filters (<code>user</code>, <code>uid</code>, <code>open</code>) or pagination (<code>limit</code>/<code>offset</code>) to reduce results.
         </li>
-        <li>All batch queries (day/hour/minute/ID range) returning more than 100,000 changesets are rejected regardless of range size. Use filters or pagination to narrow results.</li>
+        <li>All batch queries (day/hour/minute/date range/ID range) returning more than 100,000 changesets are rejected regardless of range size. Use filters or pagination to narrow results.</li>
         <li>Query deduplication happens at query-time (not write-time), so every query scans both base + delta layers. Simplifies writing but slows reads. Mitigated somewhat by the daily compacting strategy.</li>
         <li>When backfilling historical data, hourly batching means new data appears with up to 1-hour granularity. This is not an issue once the data is caught up.</li>
-        <li>The API is read-only with fixed endpoints (day/hour/minute/ID range). There's no SQL interface or arbitrary filtering. No spatial queries for example.</li>
+        <li>The API is read-only with fixed endpoints (day/hour/minute/date range/ID range). There's no SQL interface or arbitrary filtering. No spatial queries for example.</li>
         <li>OSM's replication state files are off-by-one (state file N contains sequence N-1's timestamp). The worker normalizes this internally, but it adds some complexity.</li>
     </ul>
 
